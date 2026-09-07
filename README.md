@@ -17,7 +17,18 @@ Instead of using the normal Save command, use `File > Save to Git`. This will sa
 - **Previous commits** lists the last 50 commit messages of the repository. A bullet (●) marks the commits that have not been pushed yet.
 - **Push to GitHub** pushes those commits to the remote. It shows how many are waiting (`Push to GitHub (3)`) and becomes available as soon as you have committed something. If the branch has no upstream yet, it is set to `origin` on the first push.
 
-When the push button is not available, the sheet says why, both in its status line and as a tooltip: either the repository has no remote to push to, or everything has been pushed already.
+When the push button is not available, the sheet says why, both in its status line and as a tooltip: either everything has been pushed already, or the repository has nowhere to push to.
+
+### Pushing to a folder
+
+A repository that has no remote yet has nowhere to push to, so the sheet offers a **Choose Folder…** button next to the push button. Pick a folder — on a server, an external disk, a shared drive — and it becomes the place this font is pushed to:
+
+- An **empty folder** becomes the repository itself.
+- A folder that is **not empty** gets a repository created inside it, named after your own (`Meteora.git`).
+- An existing repository that was made this way is simply reused.
+- A **working copy** (a normal checkout with a `.git` folder) is refused, because git will not push into one.
+
+Since a folder is not GitHub, the push button is then labelled just **Push**. The button disappears once a remote is set up.
 
 ## Known Issues
 

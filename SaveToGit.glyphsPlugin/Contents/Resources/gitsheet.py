@@ -7,7 +7,7 @@
 import os
 import subprocess
 
-from AppKit import NSFont
+from AppKit import NSFont, NSModalResponseOK, NSOpenPanel
 from GlyphsApp import Glyphs
 
 import vanilla
@@ -57,6 +57,30 @@ def is_git_repo(path):
     return ok
 
 
+def repo_kind(path):
+    """What kind of repository a folder itself is: "bare", "checkout", None.
+
+    This looks at the folder only. Asking git would walk up to a parent
+    repository, which would misjudge an empty folder inside one.
+    """
+    if os.path.isdir(os.path.join(path, ".git")):
+        return "checkout"
+    if os.path.isfile(os.path.join(path, "HEAD")) and os.path.isdir(
+        os.path.join(path, "objects")
+    ):
+        return "bare"
+    return None
+
+
+def is_empty_dir(path):
+    """Whether a folder holds nothing worth worrying about."""
+    ignore = {".DS_Store", ".localized"}
+    try:
+        return not [e for e in os.listdir(path) if e not in ignore]
+    except OSError:
+        return False
+
+
 class CommitSheet:
     """The "Save to Git…" sheet for one font."""
 
@@ -75,14 +99,16 @@ class CommitSheet:
             self.w = vanilla.Window(
                 (520, 460),
                 title,
-                minSize=(420, 360),
+                # Narrower than this and the buttons at the bottom collide.
+                minSize=(520, 360),
                 autosaveName="de.kutilek.SaveToGit.window",
             )
         else:
             self.w = vanilla.Sheet(
                 (520, 460),
                 parentWindow,
-                minSize=(420, 360),
+                # Narrower than this and the buttons at the bottom collide.
+                minSize=(520, 360),
                 maxSize=(900, 1000),
                 autosaveName="de.kutilek.SaveToGit.sheet",
             )
@@ -147,6 +173,12 @@ class CommitSheet:
             Glyphs.localize({"en": "Push to GitHub", "de": "Zu GitHub pushen"}),
             callback=self.pushCallback,
         )
+        # Only shown when there is no remote to push to yet.
+        self.w.chooseFolderButton = vanilla.Button(
+            (-326, -40, 144, 24),
+            Glyphs.localize({"en": "Choose Folder…", "de": "Ordner wählen…"}),
+            callback=self.chooseFolderCallback,
+        )
 
         self.w.setDefaultButton(self.w.commitButton)
         self.w.doneButton.bind("\x1b", [])
@@ -176,6 +208,22 @@ class CommitSheet:
     def has_remote(self):
         ok, out = git(["remote"], self.fontdir)
         return ok and bool(out.strip())
+
+    def remote_url(self):
+        """The URL of the first remote, or "" if there is none."""
+        ok, out = git(["remote"], self.fontdir)
+        if not ok or not out.strip():
+            return ""
+        name = out.split()[0]
+        ok, url = git(["remote", "get-url", name], self.fontdir)
+        return url.strip() if ok else ""
+
+    def repo_name(self):
+        """The name of the repository the font is in."""
+        ok, root = git(["rev-parse", "--show-toplevel"], self.fontdir)
+        if ok and root.strip():
+            return os.path.basename(root.strip())
+        return os.path.splitext(self.fontfile)[0]
 
     def ahead_count(self):
         """How many local commits are not on the tracked remote branch.
@@ -222,9 +270,14 @@ class CommitSheet:
             )
         self.w.log.set(items)
 
-        push_title = Glyphs.localize(
-            {"en": "Push to GitHub", "de": "Zu GitHub pushen"}
-        )
+        # Pushing to a folder is not pushing to GitHub, so say what it is.
+        url = self.remote_url()
+        if url and "github.com" not in url:
+            push_title = Glyphs.localize({"en": "Push", "de": "Pushen"})
+        else:
+            push_title = Glyphs.localize(
+                {"en": "Push to GitHub", "de": "Zu GitHub pushen"}
+            )
         if ahead:
             push_title += f" ({ahead})"
         self.w.pushButton.setTitle(push_title)
@@ -232,13 +285,13 @@ class CommitSheet:
         # Work out whether pushing is possible at all, and why not.
         # ahead is None when the branch has no upstream yet, which still
         # means there is something to push.
-        if not self.has_remote():
+        if not url:
             self.push_reason = Glyphs.localize(
                 {
-                    "en": "This repository has no remote, so there is "
-                    "nowhere to push to. Add one on GitHub first.",
-                    "de": "Dieses Repository hat kein Remote, es gibt also "
-                    "nichts zum Pushen. Lege zuerst eines auf GitHub an.",
+                    "en": "This repository has nowhere to push to yet. "
+                    "Choose a folder to push to.",
+                    "de": "Dieses Repository hat noch kein Ziel zum Pushen. "
+                    "Wähle einen Ordner zum Pushen.",
                 }
             )
         elif ahead == 0:
@@ -253,6 +306,8 @@ class CommitSheet:
 
         self.w.pushButton.enable(not self.push_reason)
         self.w.pushButton.getNSButton().setToolTip_(self.push_reason)
+        # The folder picker is only of use while there is no remote.
+        self.w.chooseFolderButton.show(not url)
         return ahead
 
     # Callbacks
@@ -300,6 +355,95 @@ class CommitSheet:
             status += " — " + self.waiting_text(ahead)
         self.set_status(status)
 
+    def chooseFolderCallback(self, sender):
+        """Pick a folder to push to, and make it this repository's origin."""
+        panel = NSOpenPanel.openPanel()
+        panel.setCanChooseFiles_(False)
+        panel.setCanChooseDirectories_(True)
+        panel.setAllowsMultipleSelection_(False)
+        panel.setCanCreateDirectories_(True)
+        panel.setPrompt_(Glyphs.localize({"en": "Choose", "de": "Wählen"}))
+        panel.setMessage_(
+            Glyphs.localize(
+                {
+                    "en": "Choose a folder to push this font to. An empty "
+                    "folder becomes the repository itself; in a folder that "
+                    "is not empty, one is created inside it.",
+                    "de": "Wähle einen Ordner, in den diese Schrift gepusht "
+                    "werden soll. Ein leerer Ordner wird selbst zum "
+                    "Repository; in einem nicht leeren wird eines angelegt.",
+                }
+            )
+        )
+        if panel.runModal() != NSModalResponseOK:
+            return
+
+        chosen = str(panel.URLs()[0].path())
+        target = self.prepare_remote_folder(chosen)
+        if target is None:
+            return
+
+        ok, out = git(["remote", "add", "origin", target], self.fontdir)
+        if not ok:
+            self.set_status(f"Could not add the remote: {out}")
+            return
+
+        self.reload()
+        self.messageChangedCallback(self.w.message)
+        self.set_status(
+            Glyphs.localize(
+                {
+                    "en": f"This font now pushes to {target}",
+                    "de": f"Diese Schrift pusht jetzt nach {target}",
+                }
+            )
+        )
+
+    def prepare_remote_folder(self, chosen):
+        """Return a folder that can be pushed to, creating it if needed.
+
+        Returns None and explains itself in the status line if the chosen
+        folder cannot be used.
+        """
+        kind = repo_kind(chosen)
+        if kind == "bare":
+            # Already a repository meant to be pushed to.
+            return chosen
+
+        if kind == "checkout":
+            self.set_status(
+                Glyphs.localize(
+                    {
+                        "en": "That folder is a working copy, and git "
+                        "refuses to push into one. Choose an empty folder "
+                        "instead.",
+                        "de": "Dieser Ordner ist eine Arbeitskopie, und git "
+                        "weigert sich, dorthin zu pushen. Wähle "
+                        "stattdessen einen leeren Ordner.",
+                    }
+                )
+            )
+            return None
+
+        # Not a repository yet: make one. An empty folder becomes the
+        # repository, otherwise it gets one inside it, named after this repo.
+        if is_empty_dir(chosen):
+            target = chosen
+        else:
+            target = os.path.join(chosen, self.repo_name() + ".git")
+            if os.path.exists(target) and repo_kind(target) != "bare":
+                self.set_status(
+                    f"There is already something called "
+                    f"{os.path.basename(target)} in that folder."
+                )
+                return None
+
+        ok, out = git(["init", "--bare", target], chosen)
+        if not ok:
+            self.set_status(f"Could not create a repository there: {out}")
+            return None
+        return target
+
     def pushCallback(self, sender):
         self.w.pushButton.enable(False)
         self.w.commitButton.enable(False)
@@ -320,11 +464,20 @@ class CommitSheet:
                 )
 
         if ok:
-            self.set_status(
-                Glyphs.localize(
-                    {"en": "Pushed to GitHub.", "de": "Zu GitHub gepusht."}
+            url = self.remote_url()
+            if url and "github.com" not in url:
+                # Pushing to a folder: say which one.
+                self.set_status(
+                    Glyphs.localize(
+                        {"en": f"Pushed to {url}", "de": f"Nach {url} gepusht"}
+                    )
                 )
-            )
+            else:
+                self.set_status(
+                    Glyphs.localize(
+                        {"en": "Pushed to GitHub.", "de": "Zu GitHub gepusht."}
+                    )
+                )
         else:
             self.set_status(f"Push failed: {out}")
         self.reload()
