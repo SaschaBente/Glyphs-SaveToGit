@@ -7,7 +7,7 @@
 import os
 import subprocess
 
-from AppKit import NSFont, NSModalResponseOK, NSOpenPanel
+from AppKit import NSFont, NSModalResponseOK, NSOpenPanel, NSURL
 from GlyphsApp import Glyphs
 
 import vanilla
@@ -218,11 +218,25 @@ class CommitSheet:
         ok, url = git(["remote", "get-url", name], self.fontdir)
         return url.strip() if ok else ""
 
+    def repo_root(self):
+        """The top level of the repository the font is in, or ""."""
+        ok, root = git(["rev-parse", "--show-toplevel"], self.fontdir)
+        return root.strip() if ok else ""
+
+    def is_inside_repo(self, path):
+        """Whether a folder is the repository itself or sits within it."""
+        root = self.repo_root()
+        if not root:
+            return False
+        root = os.path.realpath(root)
+        path = os.path.realpath(path)
+        return path == root or path.startswith(root + os.sep)
+
     def repo_name(self):
         """The name of the repository the font is in."""
-        ok, root = git(["rev-parse", "--show-toplevel"], self.fontdir)
-        if ok and root.strip():
-            return os.path.basename(root.strip())
+        root = self.repo_root()
+        if root:
+            return os.path.basename(root)
         return os.path.splitext(self.fontfile)[0]
 
     def ahead_count(self):
@@ -375,6 +389,14 @@ class CommitSheet:
                 }
             )
         )
+        # Start next to the repository rather than inside it, since a folder
+        # within it cannot be used anyway.
+        root = self.repo_root()
+        if root:
+            panel.setDirectoryURL_(
+                NSURL.fileURLWithPath_(os.path.dirname(root))
+            )
+
         if panel.runModal() != NSModalResponseOK:
             return
 
@@ -405,6 +427,23 @@ class CommitSheet:
         Returns None and explains itself in the status line if the chosen
         folder cannot be used.
         """
+        # A copy kept inside the repository it copies is no copy at all, and
+        # it would sit in the working tree as untracked clutter.
+        if self.is_inside_repo(chosen):
+            self.set_status(
+                Glyphs.localize(
+                    {
+                        "en": "That folder is inside this repository itself. "
+                        "Choose one outside it, so the copy is somewhere "
+                        "else.",
+                        "de": "Dieser Ordner liegt im Repository selbst. "
+                        "Wähle einen außerhalb, damit die Kopie woanders "
+                        "liegt.",
+                    }
+                )
+            )
+            return None
+
         kind = repo_kind(chosen)
         if kind == "bare":
             # Already a repository meant to be pushed to.

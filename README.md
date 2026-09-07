@@ -23,6 +23,7 @@ When the push button is not available, the sheet says why, both in its status li
 
 A repository that has no remote yet has nowhere to push to, so the sheet offers a **Choose Folder…** button next to the push button. Pick a folder — on a server, an external disk, a shared drive — and it becomes the place this font is pushed to:
 
+- The folder has to be **outside the repository** the font is in. A copy kept inside the thing it copies is no copy at all, so the picker opens next to your repository rather than in it.
 - An **empty folder** becomes the repository itself.
 - A folder that is **not empty** gets a repository created inside it, named after your own (`Meteora.git`).
 - An existing repository that was made this way is simply reused.
