@@ -1,6 +1,8 @@
 import objc
 
+import os
 import subprocess
+import sys
 
 from pathlib import Path
 from re import compile, sub
@@ -8,6 +10,21 @@ from re import compile, sub
 from AppKit import NSClassFromString, NSMenuItem
 from GlyphsApp import FILE_MENU, Glyphs, Message
 from GlyphsApp.plugins import GeneralPlugin
+
+# The sheet lives next to this file, so make sure it can be imported.
+_RESOURCES = os.path.dirname(os.path.abspath(__file__))
+if _RESOURCES not in sys.path:
+    sys.path.insert(0, _RESOURCES)
+
+try:
+    from gitsheet import CommitSheet, is_git_repo
+except ImportError as e:
+    # vanilla is missing: keep the plain "Save to Git" command working.
+    CommitSheet = None
+    IMPORT_ERROR = e
+
+    def is_git_repo(path):
+        return True
 
 
 GSCompareFonts = NSClassFromString("GSCompareFonts")
@@ -21,6 +38,9 @@ class SaveToGit(GeneralPlugin):
         self.name = Glyphs.localize(
             {"en": "Save to Git", "de": "In Git sichern"}
         )
+        # The same command, but with a sheet to write the commit message in.
+        self.sheet_name = self.name + "…"
+        self.sheet = None
 
     @objc.python_method
     def start(self):
@@ -30,6 +50,12 @@ class SaveToGit(GeneralPlugin):
         saveAndCommitMenuItem.setTarget_(self)
         saveAndCommitMenuItem.setAction_(self.saveAndCommit_)
         Glyphs.menu[FILE_MENU].append(saveAndCommitMenuItem)
+
+        openSheetMenuItem = NSMenuItem.alloc().init()
+        openSheetMenuItem.setTitle_(self.sheet_name)
+        openSheetMenuItem.setTarget_(self)
+        openSheetMenuItem.setAction_(self.openCommitSheet_)
+        Glyphs.menu[FILE_MENU].append(openSheetMenuItem)
 
     def validateMenuItem_(self, menuItem):
         return Glyphs.font is not None
@@ -82,10 +108,17 @@ class SaveToGit(GeneralPlugin):
             msg += ": " + ", ".join(sorted(set(glyphs)))
         return msg
 
-    def saveAndCommit_(self, sender):
+    @objc.python_method
+    def saveAndDescribe(self):
+        """Save the current font and describe its changes.
+
+        Returns (font, fontdir, fontfile, msg), where msg is the suggested
+        commit message, or None when the changes could not be determined.
+        Returns None altogether when there is no font to save.
+        """
         font = Glyphs.font
         if font is None:
-            return
+            return None
 
         font_path = font.filepath
         if font_path is None:
@@ -96,7 +129,7 @@ class SaveToGit(GeneralPlugin):
                 ),
                 title=self.name,
             )
-            return
+            return None
 
         fontdir = Path(font_path).parent
         fontfile = Path(font_path).name
@@ -110,6 +143,14 @@ class SaveToGit(GeneralPlugin):
         else:
             # print(font_path, "is all in one format")
             msg = self._compareAllInOne(font, fontfile, fontdir)
+
+        return font, fontdir, fontfile, msg
+
+    def saveAndCommit_(self, sender):
+        prepared = self.saveAndDescribe()
+        if prepared is None:
+            return
+        font, fontdir, fontfile, msg = prepared
 
         if msg is None:
             Message(
@@ -127,6 +168,68 @@ class SaveToGit(GeneralPlugin):
         # Commit changes
         self.run_git_cmd(["git", "commit", "-m", msg], fontdir)
         Glyphs.showNotification(self.name, msg)
+
+    # "Save to Git…": the same thing, but with a sheet
+
+    def openCommitSheet_(self, sender):
+        if CommitSheet is None:
+            Message(
+                message=(
+                    "The commit sheet needs the vanilla module, which could "
+                    f"not be imported: {IMPORT_ERROR}\nYou can install it "
+                    "from Window > Plugin Manager > Modules."
+                ),
+                title=self.sheet_name,
+            )
+            return
+
+        prepared = self.saveAndDescribe()
+        if prepared is None:
+            return
+        font, fontdir, fontfile, msg = prepared
+
+        if not is_git_repo(fontdir):
+            Message(
+                message=(
+                    f"“{fontfile}” is not inside a git repository, so there "
+                    "is nothing to commit to."
+                ),
+                title=self.sheet_name,
+            )
+            return
+
+        # An empty message just means we have nothing to suggest; the sheet
+        # asks for one anyway.
+        self.sheet = CommitSheet(self, font, fontdir, fontfile, msg or "")
+        self.sheet.open()
+
+    @objc.python_method
+    def parent_window(self, font):
+        """The document window to attach the sheet to, if there is one."""
+        try:
+            return font.parent.windowController().window()
+        except Exception as e:
+            print(f"{self.name}: no window to attach the sheet to ({e})")
+            return None
+
+    @objc.python_method
+    def schedule_push(self, sheet):
+        """Push after a moment, so the sheet can redraw first.
+
+        git push blocks the main thread, and the sheet should have shown its
+        "Pushing…" status before that happens.
+        """
+        self.sheet = sheet
+        try:
+            self.performSelector_withObject_afterDelay_(
+                self.performPush_, None, 0.05
+            )
+        except Exception:
+            sheet.performPush()
+
+    def performPush_(self, sender):
+        if self.sheet is not None:
+            self.sheet.performPush()
 
     @objc.python_method
     def _compareAllInOne(self, font, fontfile, fontdir):
