@@ -31,6 +31,8 @@ A repository that has no remote yet has nowhere to push to, so the sheet offers 
 
 Since a folder is not GitHub, the push button is then labelled just **Push**. The button disappears once a remote is set up.
 
+If that folder later goes missing — deleted, on a disk that is not plugged in, on a server that is not mounted — the sheet says so and offers **Choose Folder…** again, and picking a new one repoints the existing remote instead of adding a second.
+
 ## Known Issues
 
 - The `git` command line utility must be installed on your system (see below for instructions).

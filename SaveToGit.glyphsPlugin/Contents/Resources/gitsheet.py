@@ -206,17 +206,34 @@ class CommitSheet:
         return f"{self.fontfile} — {root}, {branch}"
 
     def has_remote(self):
-        ok, out = git(["remote"], self.fontdir)
-        return ok and bool(out.strip())
+        return bool(self.remote_name())
 
-    def remote_url(self):
-        """The URL of the first remote, or "" if there is none."""
+    def remote_name(self):
+        """The name of the first remote, or "" if there is none."""
         ok, out = git(["remote"], self.fontdir)
         if not ok or not out.strip():
             return ""
-        name = out.split()[0]
+        return out.split()[0]
+
+    def remote_url(self):
+        """The URL of the first remote, or "" if there is none."""
+        name = self.remote_name()
+        if not name:
+            return ""
         ok, url = git(["remote", "get-url", name], self.fontdir)
         return url.strip() if ok else ""
+
+    def missing_remote_folder(self):
+        """A folder remote that is not there any more, or "".
+
+        Folders get deleted, disks get unplugged and servers get unmounted,
+        and git only says so once the push has already failed.
+        """
+        url = self.remote_url()
+        path = url[len("file://"):] if url.startswith("file://") else url
+        if path and os.path.isabs(path) and not os.path.isdir(path):
+            return path
+        return ""
 
     def repo_root(self):
         """The top level of the repository the font is in, or ""."""
@@ -299,6 +316,7 @@ class CommitSheet:
         # Work out whether pushing is possible at all, and why not.
         # ahead is None when the branch has no upstream yet, which still
         # means there is something to push.
+        missing = self.missing_remote_folder()
         if not url:
             self.push_reason = Glyphs.localize(
                 {
@@ -306,6 +324,15 @@ class CommitSheet:
                     "Choose a folder to push to.",
                     "de": "Dieses Repository hat noch kein Ziel zum Pushen. "
                     "Wähle einen Ordner zum Pushen.",
+                }
+            )
+        elif missing:
+            self.push_reason = Glyphs.localize(
+                {
+                    "en": f"The folder “{missing}” is not there any more. "
+                    "Choose another folder to push to.",
+                    "de": f"Den Ordner „{missing}“ gibt es nicht mehr. "
+                    "Wähle einen anderen Ordner zum Pushen.",
                 }
             )
         elif ahead == 0:
@@ -320,8 +347,9 @@ class CommitSheet:
 
         self.w.pushButton.enable(not self.push_reason)
         self.w.pushButton.getNSButton().setToolTip_(self.push_reason)
-        # The folder picker is only of use while there is no remote.
-        self.w.chooseFolderButton.show(not url)
+        # The picker is of use while there is nowhere to push, and again
+        # once the folder that was chosen has gone missing.
+        self.w.chooseFolderButton.show(not url or bool(missing))
         return ahead
 
     # Callbacks
@@ -405,10 +433,20 @@ class CommitSheet:
         if target is None:
             return
 
-        ok, out = git(["remote", "add", "origin", target], self.fontdir)
+        # Repoint the remote if there already is one, which is the case when
+        # the folder chosen earlier has gone missing.
+        name = self.remote_name()
+        if name:
+            ok, out = git(["remote", "set-url", name, target], self.fontdir)
+        else:
+            ok, out = git(["remote", "add", "origin", target], self.fontdir)
         if not ok:
-            self.set_status(f"Could not add the remote: {out}")
+            self.set_status(f"Could not set the remote: {out}")
             return
+
+        # Drop what we remember of the previous folder, so the commits are
+        # not counted as pushed when the new folder is empty.
+        git(["fetch", "--prune", self.remote_name() or "origin"], self.fontdir)
 
         self.reload()
         self.messageChangedCallback(self.w.message)
