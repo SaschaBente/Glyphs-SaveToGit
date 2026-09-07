@@ -13,9 +13,11 @@ Instead of using the normal Save command, use `File > Save to Git`. This will sa
 `File > Save to Git…` (with the ellipsis) does the same thing, but opens a sheet on the font window first:
 
 - A **commit message** field, prefilled with the message that `Save to Git` would have written by itself. Edit it, or type your own.
-- The **Commit** button stages the font file and commits it. Return commits, Escape closes the sheet.
+- The **Commit** button stages the font file and commits it. Return commits, Escape closes the sheet, and **Done** closes it when you have finished.
 - **Previous commits** lists the last 50 commit messages of the repository. A bullet (●) marks the commits that have not been pushed yet.
-- **Push to GitHub** pushes those commits to the remote. It shows how many are waiting and is disabled when there is nothing to push. If the branch has no upstream yet, it is set to `origin` on the first push.
+- **Push to GitHub** pushes those commits to the remote. It shows how many are waiting (`Push to GitHub (3)`) and becomes available as soon as you have committed something. If the branch has no upstream yet, it is set to `origin` on the first push.
+
+When the push button is not available, the sheet says why, both in its status line and as a tooltip: either the repository has no remote to push to, or everything has been pushed already.
 
 ## Known Issues
 

@@ -65,6 +65,8 @@ class CommitSheet:
         self.font = font
         self.fontdir = fontdir
         self.fontfile = fontfile
+        # Why the push button is disabled, if it is. Set by reload().
+        self.push_reason = ""
 
         title = Glyphs.localize({"en": "Save to Git", "de": "In Git sichern"})
         parentWindow = plugin.parent_window(font)
@@ -135,9 +137,9 @@ class CommitSheet:
             (16, -78, -16, 32), "", sizeStyle="small"
         )
 
-        self.w.closeButton = vanilla.Button(
+        self.w.doneButton = vanilla.Button(
             (16, -40, 90, 24),
-            Glyphs.localize({"en": "Close", "de": "Schliessen"}),
+            Glyphs.localize({"en": "Done", "de": "Fertig"}),
             callback=self.closeCallback,
         )
         self.w.pushButton = vanilla.Button(
@@ -147,11 +149,15 @@ class CommitSheet:
         )
 
         self.w.setDefaultButton(self.w.commitButton)
-        self.w.closeButton.bind("\x1b", [])
+        self.w.doneButton.bind("\x1b", [])
 
         ahead = self.reload()
         self.messageChangedCallback(self.w.message)
-        if ahead:
+        # Say why pushing is not possible, instead of only disabling the
+        # button, which looks like a bug.
+        if self.push_reason:
+            self.set_status(self.push_reason)
+        elif ahead:
             self.set_status(self.waiting_text(ahead))
 
     # Information about the repository
@@ -222,8 +228,31 @@ class CommitSheet:
         if ahead:
             push_title += f" ({ahead})"
         self.w.pushButton.setTitle(push_title)
-        # No upstream yet (ahead is None) still means there is work to push.
-        self.w.pushButton.enable(self.has_remote() and ahead != 0)
+
+        # Work out whether pushing is possible at all, and why not.
+        # ahead is None when the branch has no upstream yet, which still
+        # means there is something to push.
+        if not self.has_remote():
+            self.push_reason = Glyphs.localize(
+                {
+                    "en": "This repository has no remote, so there is "
+                    "nowhere to push to. Add one on GitHub first.",
+                    "de": "Dieses Repository hat kein Remote, es gibt also "
+                    "nichts zum Pushen. Lege zuerst eines auf GitHub an.",
+                }
+            )
+        elif ahead == 0:
+            self.push_reason = Glyphs.localize(
+                {
+                    "en": "Everything is pushed.",
+                    "de": "Alles ist gepusht.",
+                }
+            )
+        else:
+            self.push_reason = ""
+
+        self.w.pushButton.enable(not self.push_reason)
+        self.w.pushButton.getNSButton().setToolTip_(self.push_reason)
         return ahead
 
     # Callbacks
@@ -264,7 +293,10 @@ class CommitSheet:
         ahead = self.reload()
         committed = Glyphs.localize({"en": "Committed", "de": "Committet"})
         status = f"{committed}: “{msg}”"
-        if ahead:
+        if self.push_reason:
+            # Committed, but the push button is going to stay disabled.
+            status += " — " + self.push_reason
+        elif ahead:
             status += " — " + self.waiting_text(ahead)
         self.set_status(status)
 
