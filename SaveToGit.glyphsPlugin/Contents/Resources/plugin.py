@@ -17,10 +17,12 @@ if _RESOURCES not in sys.path:
     sys.path.insert(0, _RESOURCES)
 
 try:
-    from gitsheet import CommitSheet, is_git_repo
+    from gitsheet import CommitSheet, PushSheet, Repo, is_git_repo
 except ImportError as e:
     # vanilla is missing: keep the plain "Save to Git" command working.
     CommitSheet = None
+    PushSheet = None
+    Repo = None
     IMPORT_ERROR = e
 
     def is_git_repo(path):
@@ -40,6 +42,10 @@ class SaveToGit(GeneralPlugin):
         )
         # The same command, but with a sheet to write the commit message in.
         self.sheet_name = self.name + "…"
+        # Pushing is its own command, with its own sheet.
+        self.push_name = Glyphs.localize(
+            {"en": "Push to GitHub…", "de": "Zu GitHub pushen…"}
+        )
         self.sheet = None
 
     @objc.python_method
@@ -56,6 +62,12 @@ class SaveToGit(GeneralPlugin):
         openSheetMenuItem.setTarget_(self)
         openSheetMenuItem.setAction_(self.openCommitSheet_)
         Glyphs.menu[FILE_MENU].append(openSheetMenuItem)
+
+        pushMenuItem = NSMenuItem.alloc().init()
+        pushMenuItem.setTitle_(self.push_name)
+        pushMenuItem.setTarget_(self)
+        pushMenuItem.setAction_(self.openPushSheet_)
+        Glyphs.menu[FILE_MENU].append(pushMenuItem)
 
     def validateMenuItem_(self, menuItem):
         return Glyphs.font is not None
@@ -171,16 +183,40 @@ class SaveToGit(GeneralPlugin):
 
     # "Save to Git…": the same thing, but with a sheet
 
-    def openCommitSheet_(self, sender):
-        if CommitSheet is None:
+    @objc.python_method
+    def sheets_available(self, title):
+        """Whether the sheets can be shown, complaining if they cannot."""
+        if CommitSheet is not None:
+            return True
+        Message(
+            message=(
+                "The sheets need the vanilla module, which could not be "
+                f"imported: {IMPORT_ERROR}\nYou can install it from "
+                "Window > Plugin Manager > Modules."
+            ),
+            title=title,
+        )
+        return False
+
+    @objc.python_method
+    def repo_for_font(self, font, title):
+        """The repository a saved font is in, complaining if there is none."""
+        font_path = font.filepath
+        fontdir = Path(font_path).parent
+        fontfile = Path(font_path).name
+        if not is_git_repo(fontdir):
             Message(
                 message=(
-                    "The commit sheet needs the vanilla module, which could "
-                    f"not be imported: {IMPORT_ERROR}\nYou can install it "
-                    "from Window > Plugin Manager > Modules."
+                    f"“{fontfile}” is not inside a git repository, so there "
+                    "is nothing to commit to."
                 ),
-                title=self.sheet_name,
+                title=title,
             )
+            return None
+        return Repo(fontdir, fontfile)
+
+    def openCommitSheet_(self, sender):
+        if not self.sheets_available(self.sheet_name):
             return
 
         prepared = self.saveAndDescribe()
@@ -188,19 +224,40 @@ class SaveToGit(GeneralPlugin):
             return
         font, fontdir, fontfile, msg = prepared
 
-        if not is_git_repo(fontdir):
-            Message(
-                message=(
-                    f"“{fontfile}” is not inside a git repository, so there "
-                    "is nothing to commit to."
-                ),
-                title=self.sheet_name,
-            )
+        repo = self.repo_for_font(font, self.sheet_name)
+        if repo is None:
             return
 
         # An empty message just means we have nothing to suggest; the sheet
         # asks for one anyway.
-        self.sheet = CommitSheet(self, font, fontdir, fontfile, msg or "")
+        self.sheet = CommitSheet(self, font, repo, msg or "")
+        self.sheet.open()
+
+    # "Push to GitHub…": its own command, its own sheet
+
+    def openPushSheet_(self, sender):
+        if not self.sheets_available(self.push_name):
+            return
+
+        font = Glyphs.font
+        if font is None:
+            return
+        if font.filepath is None:
+            Message(
+                message=(
+                    "Please save your Glyphs file once before using "
+                    "Save to Git."
+                ),
+                title=self.push_name,
+            )
+            return
+
+        repo = self.repo_for_font(font, self.push_name)
+        if repo is None:
+            return
+
+        # Pushing neither saves nor commits, so the font is left alone.
+        self.sheet = PushSheet(self, font, repo)
         self.sheet.open()
 
     @objc.python_method

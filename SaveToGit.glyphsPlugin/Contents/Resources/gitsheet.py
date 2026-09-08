@@ -1,8 +1,11 @@
-# Save to Git — the commit sheet
+# Save to Git — the sheets
 #
-# The user interface for "Save to Git…": a sheet attached to the font window
-# with a field for the commit message, the previous commits underneath, and a
-# button to push everything to GitHub.
+# Two separate user interfaces, one for each half of the job:
+#
+#   CommitSheet  "Save to Git…"      type a message, commit, the sheet closes
+#   PushSheet    "Push to GitHub…"   see what would be pushed, and push it
+#
+# Repo is everything either of them needs to ask git, with no interface in it.
 
 import os
 import re
@@ -34,10 +37,14 @@ GH_TIMEOUT = 120
 GH_MISSING = "gh-not-installed"
 
 # Commits that have not been pushed yet are marked in the list.
-UNPUSHED_MARKER = "●  "
-PUSHED_MARKER = "     "
+UNPUSHED_MARKER = "●"
 
-LOG_LIMIT = 50
+# How many commits the push sheet shows.
+LOG_LIMIT = 5
+
+# git will not put a unit separator in a name or a subject, so it is safe
+# to split the log on.
+FIELD_SEP = "\x1f"
 
 
 def run(argv, cwd, timeout):
@@ -113,6 +120,15 @@ def repo_kind(path):
     return None
 
 
+def is_empty_dir(path):
+    """Whether a folder holds nothing worth worrying about."""
+    ignore = {".DS_Store", ".localized"}
+    try:
+        return not [e for e in os.listdir(path) if e not in ignore]
+    except OSError:
+        return False
+
+
 def github_slug(name):
     """Turn a folder name into something GitHub will accept as a repo name."""
     slug = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-.")
@@ -138,55 +154,276 @@ def publish_argv(slug, private, root):
     ]
 
 
-def is_empty_dir(path):
-    """Whether a folder holds nothing worth worrying about."""
-    ignore = {".DS_Store", ".localized"}
-    try:
-        return not [e for e in os.listdir(path) if e not in ignore]
-    except OSError:
-        return False
+class Repo:
+    """The git repository one font lives in."""
 
-
-class CommitSheet:
-    """The "Save to Git…" sheet for one font."""
-
-    def __init__(self, plugin, font, fontdir, fontfile, suggested_msg):
-        self.plugin = plugin
-        self.font = font
-        self.fontdir = fontdir
+    def __init__(self, fontdir, fontfile):
+        self.dir = fontdir
         self.fontfile = fontfile
-        # Why the push button is disabled, if it is. Set by reload().
-        self.push_reason = ""
-        # What publishCallback agreed with the user, for performPublish.
-        self.pending_publish = None
 
+    # What git knows
+
+    def branch(self):
+        ok, out = git(["rev-parse", "--abbrev-ref", "HEAD"], self.dir)
+        return out.strip() if ok else ""
+
+    def root(self):
+        """The top level of the repository, or ""."""
+        ok, out = git(["rev-parse", "--show-toplevel"], self.dir)
+        return out.strip() if ok else ""
+
+    def name(self):
+        """The name of the repository the font is in."""
+        root = self.root()
+        if root:
+            return os.path.basename(root)
+        return os.path.splitext(self.fontfile)[0]
+
+    def remote_name(self):
+        """The name of the first remote, or "" if there is none."""
+        ok, out = git(["remote"], self.dir)
+        if not ok or not out.strip():
+            return ""
+        return out.split()[0]
+
+    def remote_url(self):
+        """The URL of the first remote, or "" if there is none."""
+        name = self.remote_name()
+        if not name:
+            return ""
+        ok, url = git(["remote", "get-url", name], self.dir)
+        return url.strip() if ok else ""
+
+    def has_remote(self):
+        return bool(self.remote_name())
+
+    def missing_remote_folder(self):
+        """A folder remote that is not there any more, or "".
+
+        Folders get deleted, disks get unplugged and servers get unmounted,
+        and git only says so once the push has already failed.
+        """
+        url = self.remote_url()
+        path = url[len("file://"):] if url.startswith("file://") else url
+        if path and os.path.isabs(path) and not os.path.isdir(path):
+            return path
+        return ""
+
+    def ahead_count(self):
+        """How many commits are not on the tracked remote branch.
+
+        Returns None if the branch has no upstream yet, in which case
+        nothing has been pushed.
+        """
+        ok, out = git(["rev-list", "--count", "@{u}..HEAD"], self.dir)
+        if not ok:
+            return None
+        try:
+            return int(out.strip())
+        except ValueError:
+            return None
+
+    def unpushed_count(self):
+        """How many commits a push would send.
+
+        Without an upstream nothing has been pushed yet, so that is every
+        commit on the branch.
+        """
+        ahead = self.ahead_count()
+        if ahead is not None:
+            return ahead
+        ok, out = git(["rev-list", "--count", "HEAD"], self.dir)
+        if not ok:
+            return 0
+        try:
+            return int(out.strip())
+        except ValueError:
+            return 0
+
+    def recent_commits(self, limit=LOG_LIMIT):
+        """The last few commits, newest first.
+
+        Each one is a dict of id, author, when and subject.
+        """
+        fields = ("%h", "%an", "%ar", "%s")
+        pretty = "format:" + FIELD_SEP.join(fields)
+        ok, out = git(["log", f"-{limit}", f"--pretty={pretty}"], self.dir)
+        if not ok or not out:
+            return []
+        commits = []
+        for line in out.splitlines():
+            parts = line.split(FIELD_SEP)
+            if len(parts) != len(fields):
+                continue
+            commits.append(
+                {
+                    "id": parts[0],
+                    "author": parts[1],
+                    "when": parts[2],
+                    "subject": parts[3],
+                }
+            )
+        return commits
+
+    def is_inside(self, path):
+        """Whether a folder is the repository itself or sits within it."""
+        root = self.root()
+        if not root:
+            return False
+        root = os.path.realpath(root)
+        path = os.path.realpath(path)
+        return path == root or path.startswith(root + os.sep)
+
+    # What git can be told to do
+
+    def commit(self, msg):
+        """Stage the font and commit it."""
+        ok, out = git(["add", "--", self.fontfile], self.dir)
+        if not ok:
+            return False, out
+        return git(["commit", "-m", msg], self.dir)
+
+    def push(self):
+        """Push, setting the upstream if the branch does not have one yet."""
+        ok, out = git(["push"], self.dir, timeout=PUSH_TIMEOUT)
+        if not ok and "no upstream branch" in out:
+            branch = self.branch()
+            if branch:
+                ok, out = git(
+                    ["push", "--set-upstream", "origin", branch],
+                    self.dir,
+                    timeout=PUSH_TIMEOUT,
+                )
+        return ok, out
+
+    def set_remote(self, target):
+        """Point the remote at a folder, adding it if there is none yet."""
+        name = self.remote_name()
+        if name:
+            ok, out = git(["remote", "set-url", name, target], self.dir)
+        else:
+            ok, out = git(["remote", "add", "origin", target], self.dir)
+        if ok:
+            # Drop what we remember of the previous folder, so the commits
+            # are not counted as pushed when the new folder is empty.
+            git(["fetch", "--prune", self.remote_name() or "origin"], self.dir)
+        return ok, out
+
+    def account(self):
+        """The signed-in GitHub account, or ""."""
+        ok, out = gh(["api", "user", "--jq", ".login"], self.dir)
+        return out.strip() if ok else ""
+
+    def publish(self, slug, private):
+        """Create the repository on GitHub and push to it."""
+        return gh(publish_argv(slug, private, self.root() or self.dir), self.dir)
+
+    def prepare_folder(self, chosen):
+        """Return (folder to push to, error), creating a repository if needed.
+
+        Only one of the two is ever set.
+        """
+        # A copy kept inside the repository it copies is no copy at all, and
+        # it would sit in the working tree as untracked clutter.
+        if self.is_inside(chosen):
+            return None, Glyphs.localize(
+                {
+                    "en": "That folder is inside this repository itself. "
+                    "Choose one outside it, so the copy is somewhere else.",
+                    "de": "Dieser Ordner liegt im Repository selbst. Wähle "
+                    "einen außerhalb, damit die Kopie woanders liegt.",
+                }
+            )
+
+        kind = repo_kind(chosen)
+        if kind == "bare":
+            # Already a repository meant to be pushed to.
+            return chosen, ""
+
+        if kind == "checkout":
+            return None, Glyphs.localize(
+                {
+                    "en": "That folder is a working copy, and git refuses to "
+                    "push into one. Choose an empty folder instead.",
+                    "de": "Dieser Ordner ist eine Arbeitskopie, und git "
+                    "weigert sich, dorthin zu pushen. Wähle stattdessen "
+                    "einen leeren Ordner.",
+                }
+            )
+
+        # Not a repository yet: make one. An empty folder becomes the
+        # repository, otherwise it gets one inside it, named after this repo.
+        if is_empty_dir(chosen):
+            target = chosen
+        else:
+            target = os.path.join(chosen, github_slug(self.name()) + ".git")
+            if os.path.exists(target) and repo_kind(target) != "bare":
+                return None, (
+                    f"There is already something called "
+                    f"{os.path.basename(target)} in that folder."
+                )
+
+        ok, out = git(["init", "--bare", target], chosen)
+        if not ok:
+            return None, f"Could not create a repository there: {out}"
+        return target, ""
+
+
+class SheetBase:
+    """The window both sheets sit in."""
+
+    def make_window(self, plugin, font, size, resizable_to=None):
         title = Glyphs.localize({"en": "Save to Git", "de": "In Git sichern"})
         parentWindow = plugin.parent_window(font)
+        maxSize = resizable_to or size
         if parentWindow is None:
             # No document window to attach to: use a normal window instead.
-            self.w = vanilla.Window(
-                (520, 460),
+            return vanilla.Window(
+                size,
                 title,
-                # Narrower than this and the buttons at the bottom collide.
-                minSize=(520, 360),
-                autosaveName="de.kutilek.SaveToGit.window",
+                minSize=size,
+                maxSize=maxSize,
+                autosaveName=f"de.kutilek.SaveToGit.{type(self).__name__}",
             )
-        else:
-            self.w = vanilla.Sheet(
-                (520, 460),
-                parentWindow,
-                # Narrower than this and the buttons at the bottom collide.
-                minSize=(520, 360),
-                maxSize=(900, 1000),
-                autosaveName="de.kutilek.SaveToGit.sheet",
-            )
+        return vanilla.Sheet(
+            size,
+            parentWindow,
+            minSize=size,
+            maxSize=maxSize,
+            autosaveName=f"de.kutilek.SaveToGit.{type(self).__name__}.sheet",
+        )
+
+    def set_status(self, text):
+        self.w.status.set(text)
+
+    def closeCallback(self, sender):
+        self.w.close()
+
+    def open(self):
+        self.w.open()
+
+
+class CommitSheet(SheetBase):
+    """"Save to Git…": a message and a commit, nothing else.
+
+    Committing closes the sheet, so this is the whole of it.
+    """
+
+    def __init__(self, plugin, font, repo, suggested_msg):
+        self.plugin = plugin
+        self.font = font
+        self.repo = repo
+
+        self.w = self.make_window(plugin, font, (460, 200), (900, 200))
 
         self.w.title = vanilla.TextBox(
-            (16, 14, -16, 18), font.familyName or fontfile
+            (16, 14, -16, 18), font.familyName or repo.fontfile
         )
         self.w.title.getNSTextField().setFont_(NSFont.boldSystemFontOfSize_(13))
         self.w.subtitle = vanilla.TextBox(
-            (16, 34, -16, 14), self.branch_line(), sizeStyle="small"
+            (16, 34, -16, 14),
+            f"{repo.fontfile} — {repo.name()}, {repo.branch() or '?'}",
+            sizeStyle="small",
         )
 
         self.w.messageLabel = vanilla.TextBox(
@@ -197,34 +434,128 @@ class CommitSheet:
             sizeStyle="small",
         )
         self.w.message = vanilla.EditText(
-            (16, 82, -130, 22),
+            (16, 82, -16, 22),
             suggested_msg,
             placeholder=suggested_msg,
             callback=self.messageChangedCallback,
         )
+
+        self.w.status = vanilla.TextBox(
+            (16, 116, -16, 30), "", sizeStyle="small"
+        )
+
+        self.w.cancelButton = vanilla.Button(
+            (16, -40, 90, 24),
+            Glyphs.localize({"en": "Cancel", "de": "Abbrechen"}),
+            callback=self.closeCallback,
+        )
         self.w.commitButton = vanilla.Button(
-            (-118, 81, 102, 24),
+            (-116, -40, 100, 24),
             Glyphs.localize({"en": "Commit", "de": "Committen"}),
             callback=self.commitCallback,
         )
 
-        self.w.line = vanilla.HorizontalLine((16, 120, -16, 1))
+        self.w.setDefaultButton(self.w.commitButton)
+        self.w.cancelButton.bind("\x1b", [])
+        self.messageChangedCallback(self.w.message)
+
+    def messageChangedCallback(self, sender):
+        self.w.commitButton.enable(bool(sender.get().strip()))
+
+    def commitCallback(self, sender):
+        msg = self.w.message.get().strip()
+        if not msg:
+            return
+
+        ok, out = self.repo.commit(msg)
+        if not ok:
+            if "nothing to commit" in out or "nichts zu committen" in out:
+                self.set_status(
+                    Glyphs.localize(
+                        {
+                            "en": "Nothing to commit — the file has not "
+                            "changed since the last commit.",
+                            "de": "Nichts zu committen — die Datei hat sich "
+                            "seit dem letzten Commit nicht geändert.",
+                        }
+                    )
+                )
+            else:
+                self.set_status(f"Commit failed: {out}")
+            return
+
+        # The sheet is going away, so say what happened outside it.
+        Glyphs.showNotification(self.plugin.sheet_name, msg)
+        self.w.close()
+
+    def open(self):
+        self.w.open()
+        self.w.message.selectAll()
+
+
+class PushSheet(SheetBase):
+    """"Push to GitHub…": what is about to be pushed, and the button for it."""
+
+    def __init__(self, plugin, font, repo):
+        self.plugin = plugin
+        self.font = font
+        self.repo = repo
+        # Why the push button is disabled, if it is. Set by reload().
+        self.push_reason = ""
+        # What publishCallback agreed with the user, for performPublish.
+        self.pending_publish = None
+
+        self.w = self.make_window(plugin, font, (640, 400), (1200, 900))
+
+        self.w.title = vanilla.TextBox((16, 14, -16, 18), repo.name())
+        self.w.title.getNSTextField().setFont_(NSFont.boldSystemFontOfSize_(13))
+        self.w.subtitle = vanilla.TextBox(
+            (16, 34, -16, 14), "", sizeStyle="small"
+        )
+
         self.w.logLabel = vanilla.TextBox(
-            (16, 132, -16, 14),
+            (16, 64, -16, 14),
             Glyphs.localize(
-                {"en": "Previous commits", "de": "Bisherige Commits"}
+                {
+                    "en": f"Last {LOG_LIMIT} commits",
+                    "de": f"Die letzten {LOG_LIMIT} Commits",
+                }
             ),
             sizeStyle="small",
         )
         self.w.log = vanilla.List(
-            (16, 152, -16, -86),
+            (16, 84, -16, -86),
             [],
-            showColumnTitles=False,
+            columnDescriptions=[
+                {"title": "", "key": "marker", "width": 20},
+                {
+                    "title": Glyphs.localize(
+                        {"en": "Commit", "de": "Commit"}
+                    ),
+                    "key": "subject",
+                    "width": 260,
+                    "minWidth": 120,
+                    "maxWidth": 800,
+                },
+                {"title": "ID", "key": "id", "width": 70},
+                {
+                    "title": Glyphs.localize(
+                        {"en": "Author", "de": "Autor"}
+                    ),
+                    "key": "author",
+                    "width": 120,
+                },
+                {
+                    "title": Glyphs.localize({"en": "When", "de": "Wann"}),
+                    "key": "when",
+                    "width": 110,
+                },
+            ],
             allowsMultipleSelection=False,
             allowsEmptySelection=True,
             allowsSorting=False,
             drawFocusRing=False,
-            rowHeight=17,
+            rowHeight=18,
         )
 
         self.w.status = vanilla.TextBox(
@@ -256,95 +587,14 @@ class CommitSheet:
             callback=self.chooseFolderCallback,
         )
 
-        self.w.setDefaultButton(self.w.commitButton)
+        self.w.setDefaultButton(self.w.pushButton)
         self.w.doneButton.bind("\x1b", [])
 
-        ahead = self.reload()
-        self.messageChangedCallback(self.w.message)
-        # Say why pushing is not possible, instead of only disabling the
-        # button, which looks like a bug.
+        pending = self.reload()
         if self.push_reason:
             self.set_status(self.push_reason)
-        elif ahead:
-            self.set_status(self.waiting_text(ahead))
-
-    # Information about the repository
-
-    @property
-    def branch(self):
-        ok, branch = git(["rev-parse", "--abbrev-ref", "HEAD"], self.fontdir)
-        return branch.strip() if ok else ""
-
-    def branch_line(self):
-        ok, root = git(["rev-parse", "--show-toplevel"], self.fontdir)
-        root = os.path.basename(root) if ok else str(self.fontdir)
-        branch = self.branch or "?"
-        return f"{self.fontfile} — {root}, {branch}"
-
-    def has_remote(self):
-        return bool(self.remote_name())
-
-    def remote_name(self):
-        """The name of the first remote, or "" if there is none."""
-        ok, out = git(["remote"], self.fontdir)
-        if not ok or not out.strip():
-            return ""
-        return out.split()[0]
-
-    def remote_url(self):
-        """The URL of the first remote, or "" if there is none."""
-        name = self.remote_name()
-        if not name:
-            return ""
-        ok, url = git(["remote", "get-url", name], self.fontdir)
-        return url.strip() if ok else ""
-
-    def missing_remote_folder(self):
-        """A folder remote that is not there any more, or "".
-
-        Folders get deleted, disks get unplugged and servers get unmounted,
-        and git only says so once the push has already failed.
-        """
-        url = self.remote_url()
-        path = url[len("file://"):] if url.startswith("file://") else url
-        if path and os.path.isabs(path) and not os.path.isdir(path):
-            return path
-        return ""
-
-    def repo_root(self):
-        """The top level of the repository the font is in, or ""."""
-        ok, root = git(["rev-parse", "--show-toplevel"], self.fontdir)
-        return root.strip() if ok else ""
-
-    def is_inside_repo(self, path):
-        """Whether a folder is the repository itself or sits within it."""
-        root = self.repo_root()
-        if not root:
-            return False
-        root = os.path.realpath(root)
-        path = os.path.realpath(path)
-        return path == root or path.startswith(root + os.sep)
-
-    def repo_name(self):
-        """The name of the repository the font is in."""
-        root = self.repo_root()
-        if root:
-            return os.path.basename(root)
-        return os.path.splitext(self.fontfile)[0]
-
-    def ahead_count(self):
-        """How many local commits are not on the tracked remote branch.
-
-        Returns None if the branch has no upstream yet, in which case
-        everything is unpushed.
-        """
-        ok, out = git(["rev-list", "--count", "@{u}..HEAD"], self.fontdir)
-        if not ok:
-            return None
-        try:
-            return int(out.strip())
-        except ValueError:
-            return None
+        elif pending:
+            self.set_status(self.waiting_text(pending))
 
     @staticmethod
     def waiting_text(count):
@@ -355,44 +605,40 @@ class CommitSheet:
             }
         )
 
-    # Updating the interface
-
-    def set_status(self, text):
-        self.w.status.set(text)
-
     def reload(self):
-        """Refresh the commit list and the state of the push button."""
-        ahead = self.ahead_count()
-        ok, out = git(
-            ["log", f"-{LOG_LIMIT}", "--pretty=format:%s"], self.fontdir
-        )
-        subjects = out.splitlines() if ok and out else []
+        """Refresh the commit list and the state of the buttons."""
+        pending = self.repo.unpushed_count()
+        commits = self.repo.recent_commits()
+        for i, commit in enumerate(commits):
+            commit["marker"] = UNPUSHED_MARKER if i < pending else ""
+        self.w.log.set(commits)
 
-        items = []
-        for i, subject in enumerate(subjects):
-            # Without an upstream, none of the commits have been pushed.
-            unpushed = i < ahead if ahead is not None else True
-            items.append(
-                (UNPUSHED_MARKER if unpushed else PUSHED_MARKER) + subject
+        url = self.repo.remote_url()
+        missing = self.repo.missing_remote_folder()
+        branch = self.repo.branch() or "?"
+        self.w.subtitle.set(
+            f"{branch} → {url}"
+            if url
+            else Glyphs.localize(
+                {
+                    "en": f"{branch} — not on GitHub yet",
+                    "de": f"{branch} — noch nicht auf GitHub",
+                }
             )
-        self.w.log.set(items)
+        )
 
         # Pushing to a folder is not pushing to GitHub, so say what it is.
-        url = self.remote_url()
         if url and "github.com" not in url:
             push_title = Glyphs.localize({"en": "Push", "de": "Pushen"})
         else:
             push_title = Glyphs.localize(
                 {"en": "Push to GitHub", "de": "Zu GitHub pushen"}
             )
-        if ahead:
-            push_title += f" ({ahead})"
+        if pending:
+            push_title += f" ({pending})"
         self.w.pushButton.setTitle(push_title)
 
         # Work out whether pushing is possible at all, and why not.
-        # ahead is None when the branch has no upstream yet, which still
-        # means there is something to push.
-        missing = self.missing_remote_folder()
         if not url:
             self.push_reason = Glyphs.localize(
                 {
@@ -411,12 +657,9 @@ class CommitSheet:
                     "Wähle einen anderen Ordner zum Pushen.",
                 }
             )
-        elif ahead == 0:
+        elif pending == 0:
             self.push_reason = Glyphs.localize(
-                {
-                    "en": "Everything is pushed.",
-                    "de": "Alles ist gepusht.",
-                }
+                {"en": "Everything is pushed.", "de": "Alles ist gepusht."}
             )
         else:
             self.push_reason = ""
@@ -430,52 +673,38 @@ class CommitSheet:
         # The picker is of use while there is nowhere to push, and again
         # once the folder that was chosen has gone missing.
         self.w.chooseFolderButton.show(not url or bool(missing))
-        return ahead
+        return pending
 
-    # Callbacks
+    # Pushing
 
-    def messageChangedCallback(self, sender):
-        self.w.commitButton.enable(bool(sender.get().strip()))
+    def pushCallback(self, sender):
+        self.w.pushButton.enable(False)
+        self.set_status(Glyphs.localize({"en": "Pushing…", "de": "Pushe…"}))
+        # Let the sheet redraw before git blocks the main thread.
+        self.plugin.schedule_push(self)
 
-    def commitCallback(self, sender):
-        msg = self.w.message.get().strip()
-        if not msg:
-            return
-
-        ok, out = git(["add", "--", self.fontfile], self.fontdir)
-        if not ok:
-            self.set_status(f"Could not stage {self.fontfile}: {out}")
-            return
-
-        ok, out = git(["commit", "-m", msg], self.fontdir)
-        if not ok:
-            if "nothing to commit" in out or "nichts zu committen" in out:
+    def performPush(self):
+        ok, out = self.repo.push()
+        if ok:
+            url = self.repo.remote_url()
+            if url and "github.com" not in url:
+                # Pushing to a folder: say which one.
                 self.set_status(
                     Glyphs.localize(
-                        {
-                            "en": "Nothing to commit — the file has not "
-                            "changed since the last commit.",
-                            "de": "Nichts zu committen — die Datei hat sich "
-                            "seit dem letzten Commit nicht geändert.",
-                        }
+                        {"en": f"Pushed to {url}", "de": f"Nach {url} gepusht"}
                     )
                 )
             else:
-                self.set_status(f"Commit failed: {out}")
-            self.reload()
-            return
+                self.set_status(
+                    Glyphs.localize(
+                        {"en": "Pushed to GitHub.", "de": "Zu GitHub gepusht."}
+                    )
+                )
+        else:
+            self.set_status(f"Push failed: {out}")
+        self.reload()
 
-        self.w.message.set("")
-        self.messageChangedCallback(self.w.message)
-        ahead = self.reload()
-        committed = Glyphs.localize({"en": "Committed", "de": "Committet"})
-        status = f"{committed}: “{msg}”"
-        if self.push_reason:
-            # Committed, but the push button is going to stay disabled.
-            status += " — " + self.push_reason
-        elif ahead:
-            status += " — " + self.waiting_text(ahead)
-        self.set_status(status)
+    # Getting somewhere to push to
 
     def publishCallback(self, sender):
         """Create this repository on GitHub and push it there."""
@@ -494,8 +723,8 @@ class CommitSheet:
             )
             return
 
-        ok, account = gh(["api", "user", "--jq", ".login"], self.fontdir)
-        if not ok:
+        account = self.repo.account()
+        if not account:
             self.set_status(
                 Glyphs.localize(
                     {
@@ -508,8 +737,8 @@ class CommitSheet:
             )
             return
 
-        suggestion = github_slug(self.repo_name())
-        slug = f"{account.strip()}/{suggestion}" if account.strip() else suggestion
+        suggestion = github_slug(self.repo.name())
+        slug = f"{account}/{suggestion}"
 
         # Creating a repository is visible to other people, so always ask,
         # and let the name and the owner be edited before it happens.
@@ -545,7 +774,10 @@ class CommitSheet:
         )
 
         choice = alert.runModal()
-        if choice not in (NSAlertFirstButtonReturn, NSAlertFirstButtonReturn + 1):
+        if choice not in (
+            NSAlertFirstButtonReturn,
+            NSAlertFirstButtonReturn + 1,
+        ):
             return
         private = choice == NSAlertFirstButtonReturn
         slug = str(field.stringValue()).strip()
@@ -568,8 +800,7 @@ class CommitSheet:
 
     def performPublish(self):
         slug, private = self.pending_publish
-        root = self.repo_root() or self.fontdir
-        ok, out = gh(publish_argv(slug, private, root), self.fontdir)
+        ok, out = self.repo.publish(slug, private)
 
         self.w.publishButton.enable(True)
         self.w.chooseFolderButton.enable(True)
@@ -579,8 +810,7 @@ class CommitSheet:
             return
 
         self.reload()
-        self.messageChangedCallback(self.w.message)
-        url = self.remote_url() or slug
+        url = self.repo.remote_url() or slug
         self.set_status(
             Glyphs.localize(
                 {"en": f"Published to {url}", "de": f"Angelegt: {url}"}
@@ -609,7 +839,7 @@ class CommitSheet:
         )
         # Start next to the repository rather than inside it, since a folder
         # within it cannot be used anyway.
-        root = self.repo_root()
+        root = self.repo.root()
         if root:
             panel.setDirectoryURL_(
                 NSURL.fileURLWithPath_(os.path.dirname(root))
@@ -619,27 +849,17 @@ class CommitSheet:
             return
 
         chosen = str(panel.URLs()[0].path())
-        target = self.prepare_remote_folder(chosen)
-        if target is None:
+        target, error = self.repo.prepare_folder(chosen)
+        if error:
+            self.set_status(error)
             return
 
-        # Repoint the remote if there already is one, which is the case when
-        # the folder chosen earlier has gone missing.
-        name = self.remote_name()
-        if name:
-            ok, out = git(["remote", "set-url", name, target], self.fontdir)
-        else:
-            ok, out = git(["remote", "add", "origin", target], self.fontdir)
+        ok, out = self.repo.set_remote(target)
         if not ok:
             self.set_status(f"Could not set the remote: {out}")
             return
 
-        # Drop what we remember of the previous folder, so the commits are
-        # not counted as pushed when the new folder is empty.
-        git(["fetch", "--prune", self.remote_name() or "origin"], self.fontdir)
-
         self.reload()
-        self.messageChangedCallback(self.w.message)
         self.set_status(
             Glyphs.localize(
                 {
@@ -648,111 +868,3 @@ class CommitSheet:
                 }
             )
         )
-
-    def prepare_remote_folder(self, chosen):
-        """Return a folder that can be pushed to, creating it if needed.
-
-        Returns None and explains itself in the status line if the chosen
-        folder cannot be used.
-        """
-        # A copy kept inside the repository it copies is no copy at all, and
-        # it would sit in the working tree as untracked clutter.
-        if self.is_inside_repo(chosen):
-            self.set_status(
-                Glyphs.localize(
-                    {
-                        "en": "That folder is inside this repository itself. "
-                        "Choose one outside it, so the copy is somewhere "
-                        "else.",
-                        "de": "Dieser Ordner liegt im Repository selbst. "
-                        "Wähle einen außerhalb, damit die Kopie woanders "
-                        "liegt.",
-                    }
-                )
-            )
-            return None
-
-        kind = repo_kind(chosen)
-        if kind == "bare":
-            # Already a repository meant to be pushed to.
-            return chosen
-
-        if kind == "checkout":
-            self.set_status(
-                Glyphs.localize(
-                    {
-                        "en": "That folder is a working copy, and git "
-                        "refuses to push into one. Choose an empty folder "
-                        "instead.",
-                        "de": "Dieser Ordner ist eine Arbeitskopie, und git "
-                        "weigert sich, dorthin zu pushen. Wähle "
-                        "stattdessen einen leeren Ordner.",
-                    }
-                )
-            )
-            return None
-
-        # Not a repository yet: make one. An empty folder becomes the
-        # repository, otherwise it gets one inside it, named after this repo.
-        if is_empty_dir(chosen):
-            target = chosen
-        else:
-            target = os.path.join(chosen, self.repo_name() + ".git")
-            if os.path.exists(target) and repo_kind(target) != "bare":
-                self.set_status(
-                    f"There is already something called "
-                    f"{os.path.basename(target)} in that folder."
-                )
-                return None
-
-        ok, out = git(["init", "--bare", target], chosen)
-        if not ok:
-            self.set_status(f"Could not create a repository there: {out}")
-            return None
-        return target
-
-    def pushCallback(self, sender):
-        self.w.pushButton.enable(False)
-        self.w.commitButton.enable(False)
-        self.set_status(Glyphs.localize({"en": "Pushing…", "de": "Pushe…"}))
-        # Let the sheet redraw before git blocks the main thread.
-        self.plugin.schedule_push(self)
-
-    def performPush(self):
-        ok, out = git(["push"], self.fontdir, timeout=PUSH_TIMEOUT)
-        if not ok and "no upstream branch" in out:
-            # First push of this branch: set the upstream along the way.
-            branch = self.branch
-            if branch:
-                ok, out = git(
-                    ["push", "--set-upstream", "origin", branch],
-                    self.fontdir,
-                    timeout=PUSH_TIMEOUT,
-                )
-
-        if ok:
-            url = self.remote_url()
-            if url and "github.com" not in url:
-                # Pushing to a folder: say which one.
-                self.set_status(
-                    Glyphs.localize(
-                        {"en": f"Pushed to {url}", "de": f"Nach {url} gepusht"}
-                    )
-                )
-            else:
-                self.set_status(
-                    Glyphs.localize(
-                        {"en": "Pushed to GitHub.", "de": "Zu GitHub gepusht."}
-                    )
-                )
-        else:
-            self.set_status(f"Push failed: {out}")
-        self.reload()
-        self.messageChangedCallback(self.w.message)
-
-    def closeCallback(self, sender):
-        self.w.close()
-
-    def open(self):
-        self.w.open()
-        self.w.message.selectAll()

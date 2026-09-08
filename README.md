@@ -8,20 +8,25 @@ If you collaborate with others on a font through Git, you will definitely need a
 
 Instead of using the normal Save command, use `File > Save to Git`. This will save your file and commit the changes to the git repository the current file is part of.
 
+Committing and pushing are two separate commands, so that saving your work does not drag the rest of git along with it.
+
 ### Writing your own commit message
 
-`File > Save to Git…` (with the ellipsis) does the same thing, but opens a sheet on the font window first:
+`File > Save to Git…` (with the ellipsis) saves the file like the plain command, then opens a small sheet with one thing on it: a **commit message** field, prefilled with the message that `Save to Git` would have written by itself. Edit it, or type your own, and press **Commit**. The sheet closes and Glyphs shows a notification with the message. Return commits, Escape cancels.
 
-- A **commit message** field, prefilled with the message that `Save to Git` would have written by itself. Edit it, or type your own.
-- The **Commit** button stages the font file and commits it. Return commits, Escape closes the sheet, and **Done** closes it when you have finished.
-- **Previous commits** lists the last 50 commit messages of the repository. A bullet (●) marks the commits that have not been pushed yet.
-- **Push to GitHub** pushes those commits to the remote. It shows how many are waiting (`Push to GitHub (3)`) and becomes available as soon as you have committed something. If the branch has no upstream yet, it is set to `origin` on the first push.
+Nothing else happens: no pushing, no lists, no other buttons. If there is nothing to commit, or git refuses, the sheet stays open and says so.
 
-When the push button is not available, the sheet says why, both in its status line and as a tooltip: either everything has been pushed already, or the repository has nowhere to push to.
+### Pushing
+
+`File > Push to GitHub…` opens a separate sheet showing the last 5 commits, the way GitHub Desktop does — message, short commit ID, who made it and when. A bullet (●) marks the ones that have not been pushed yet, and the header line says which branch goes where.
+
+One **Push to GitHub** button sends them, showing how many are waiting (`Push to GitHub (3)`). If the branch has no upstream yet, it is set to `origin` on the first push. When the button is not available the sheet says why, in its status line and as a tooltip: either everything has been pushed already, or there is nowhere to push to.
+
+This command neither saves nor commits — it only pushes what you have already committed.
 
 ### Putting the repository on GitHub
 
-A repository that was made locally (`git init`, or *Create New Repository* in GitHub Desktop) is not connected to GitHub, so there is nothing to push to. The sheet then offers **Publish to GitHub…**, which creates the repository on GitHub and pushes everything committed so far to it. From then on the push button sends your commits to that same repository, like any normal clone.
+A repository that was made locally (`git init`, or *Create New Repository* in GitHub Desktop) is not connected to GitHub, so there is nothing to push to. The push sheet then offers **Publish to GitHub…** in place of the push button, which creates the repository on GitHub and pushes everything committed so far to it. From then on the push button sends your commits to that same repository, like any normal clone.
 
 It asks before creating anything, and lets you edit the name and the owner: `SaschaBente/my-font` makes it yours, `dinamo-typefaces/my-font` puts it in that organisation. You choose private or public in the same dialog.
 
