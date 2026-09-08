@@ -5,9 +5,20 @@
 # button to push everything to GitHub.
 
 import os
+import re
+import shutil
 import subprocess
 
-from AppKit import NSFont, NSModalResponseOK, NSOpenPanel, NSURL
+from AppKit import (
+    NSAlert,
+    NSAlertFirstButtonReturn,
+    NSFont,
+    NSMakeRect,
+    NSModalResponseOK,
+    NSOpenPanel,
+    NSTextField,
+    NSURL,
+)
 from GlyphsApp import Glyphs
 
 import vanilla
@@ -17,6 +28,10 @@ import vanilla
 # run with the prompt disabled and a timeout.
 GIT_TIMEOUT = 20
 PUSH_TIMEOUT = 120
+GH_TIMEOUT = 120
+
+# Told apart from a real failure of the GitHub CLI.
+GH_MISSING = "gh-not-installed"
 
 # Commits that have not been pushed yet are marked in the list.
 UNPUSHED_MARKER = "●  "
@@ -25,8 +40,8 @@ PUSHED_MARKER = "     "
 LOG_LIMIT = 50
 
 
-def git(args, cwd, timeout=GIT_TIMEOUT):
-    """Run a git command and return (success, output).
+def run(argv, cwd, timeout):
+    """Run a command and return (success, output).
 
     Never raises, never prompts, never blocks indefinitely. The output is
     stdout and stderr combined, as stripped text.
@@ -36,7 +51,7 @@ def git(args, cwd, timeout=GIT_TIMEOUT):
     env["GIT_OPTIONAL_LOCKS"] = "0"
     try:
         result = subprocess.run(
-            ["git"] + args,
+            argv,
             cwd=str(cwd),
             env=env,
             timeout=timeout,
@@ -45,11 +60,37 @@ def git(args, cwd, timeout=GIT_TIMEOUT):
             shell=False,
         )
     except subprocess.TimeoutExpired:
-        return False, f"git {args[0]} timed out after {timeout} seconds."
+        name = os.path.basename(argv[0])
+        return False, f"{name} timed out after {timeout} seconds."
     except OSError as e:
-        return False, f"Could not run git: {e}"
+        return False, f"Could not run {os.path.basename(argv[0])}: {e}"
     output = result.stdout.decode("utf-8", "replace").strip()
     return result.returncode == 0, output
+
+
+def git(args, cwd, timeout=GIT_TIMEOUT):
+    """Run a git command and return (success, output)."""
+    return run(["git"] + args, cwd, timeout)
+
+
+def find_gh():
+    """The GitHub CLI, or "".
+
+    Glyphs is launched from the Finder, so its PATH does not include the
+    places Homebrew puts things; look there directly.
+    """
+    for path in ("/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"):
+        if os.access(path, os.X_OK):
+            return path
+    return shutil.which("gh") or ""
+
+
+def gh(args, cwd, timeout=GH_TIMEOUT):
+    """Run a GitHub CLI command and return (success, output)."""
+    exe = find_gh()
+    if not exe:
+        return False, GH_MISSING
+    return run([exe] + args, cwd, timeout)
 
 
 def is_git_repo(path):
@@ -72,6 +113,31 @@ def repo_kind(path):
     return None
 
 
+def github_slug(name):
+    """Turn a folder name into something GitHub will accept as a repo name."""
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-.")
+    return slug or "font"
+
+
+def publish_argv(slug, private, root):
+    """The GitHub CLI arguments that publish a repository.
+
+    Kept apart from the interface so it can be checked without creating
+    anything on GitHub.
+    """
+    return [
+        "repo",
+        "create",
+        slug,
+        "--private" if private else "--public",
+        "--source",
+        str(root),
+        "--remote",
+        "origin",
+        "--push",
+    ]
+
+
 def is_empty_dir(path):
     """Whether a folder holds nothing worth worrying about."""
     ignore = {".DS_Store", ".localized"}
@@ -91,6 +157,8 @@ class CommitSheet:
         self.fontfile = fontfile
         # Why the push button is disabled, if it is. Set by reload().
         self.push_reason = ""
+        # What publishCallback agreed with the user, for performPublish.
+        self.pending_publish = None
 
         title = Glyphs.localize({"en": "Save to Git", "de": "In Git sichern"})
         parentWindow = plugin.parent_window(font)
@@ -173,7 +241,15 @@ class CommitSheet:
             Glyphs.localize({"en": "Push to GitHub", "de": "Zu GitHub pushen"}),
             callback=self.pushCallback,
         )
-        # Only shown when there is no remote to push to yet.
+        # These two take the place of the push button while there is no
+        # remote: put the repository on GitHub, or push to a folder instead.
+        self.w.publishButton = vanilla.Button(
+            (-176, -40, 160, 24),
+            Glyphs.localize(
+                {"en": "Publish to GitHub…", "de": "Auf GitHub anlegen…"}
+            ),
+            callback=self.publishCallback,
+        )
         self.w.chooseFolderButton = vanilla.Button(
             (-326, -40, 144, 24),
             Glyphs.localize({"en": "Choose Folder…", "de": "Ordner wählen…"}),
@@ -320,10 +396,10 @@ class CommitSheet:
         if not url:
             self.push_reason = Glyphs.localize(
                 {
-                    "en": "This repository has nowhere to push to yet. "
-                    "Choose a folder to push to.",
-                    "de": "Dieses Repository hat noch kein Ziel zum Pushen. "
-                    "Wähle einen Ordner zum Pushen.",
+                    "en": "This repository is not on GitHub yet. Publish it "
+                    "there, or choose a folder to push to instead.",
+                    "de": "Dieses Repository ist noch nicht auf GitHub. Lege "
+                    "es dort an, oder wähle stattdessen einen Ordner.",
                 }
             )
         elif missing:
@@ -347,6 +423,10 @@ class CommitSheet:
 
         self.w.pushButton.enable(not self.push_reason)
         self.w.pushButton.getNSButton().setToolTip_(self.push_reason)
+        # With nowhere to push, the push button has nothing to do: offer the
+        # two ways of getting a destination in its place instead.
+        self.w.pushButton.show(bool(url))
+        self.w.publishButton.show(not url)
         # The picker is of use while there is nowhere to push, and again
         # once the folder that was chosen has gone missing.
         self.w.chooseFolderButton.show(not url or bool(missing))
@@ -396,6 +476,116 @@ class CommitSheet:
         elif ahead:
             status += " — " + self.waiting_text(ahead)
         self.set_status(status)
+
+    def publishCallback(self, sender):
+        """Create this repository on GitHub and push it there."""
+        if not find_gh():
+            self.set_status(
+                Glyphs.localize(
+                    {
+                        "en": "The GitHub CLI (gh) is not installed. Install "
+                        "it with “brew install gh”, then run “gh auth login” "
+                        "once in the Terminal.",
+                        "de": "Das GitHub-CLI (gh) ist nicht installiert. "
+                        "Installiere es mit „brew install gh“ und führe "
+                        "einmal „gh auth login“ im Terminal aus.",
+                    }
+                )
+            )
+            return
+
+        ok, account = gh(["api", "user", "--jq", ".login"], self.fontdir)
+        if not ok:
+            self.set_status(
+                Glyphs.localize(
+                    {
+                        "en": "Not signed in to GitHub. Run “gh auth login” "
+                        "once in the Terminal.",
+                        "de": "Nicht bei GitHub angemeldet. Führe einmal "
+                        "„gh auth login“ im Terminal aus.",
+                    }
+                )
+            )
+            return
+
+        suggestion = github_slug(self.repo_name())
+        slug = f"{account.strip()}/{suggestion}" if account.strip() else suggestion
+
+        # Creating a repository is visible to other people, so always ask,
+        # and let the name and the owner be edited before it happens.
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(
+            Glyphs.localize(
+                {"en": "Publish to GitHub", "de": "Auf GitHub anlegen"}
+            )
+        )
+        alert.setInformativeText_(
+            Glyphs.localize(
+                {
+                    "en": "A repository is created and everything committed "
+                    "so far is pushed to it. Change the owner before the "
+                    "slash to put it in an organisation.",
+                    "de": "Es wird ein Repository angelegt und alles bisher "
+                    "Committete dorthin gepusht. Ändere den Namen vor dem "
+                    "Schrägstrich für eine Organisation.",
+                }
+            )
+        )
+        field = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 320, 24))
+        field.setStringValue_(slug)
+        alert.setAccessoryView_(field)
+        alert.addButtonWithTitle_(
+            Glyphs.localize({"en": "Create Private", "de": "Privat anlegen"})
+        )
+        alert.addButtonWithTitle_(
+            Glyphs.localize({"en": "Create Public", "de": "Öffentlich anlegen"})
+        )
+        alert.addButtonWithTitle_(
+            Glyphs.localize({"en": "Cancel", "de": "Abbrechen"})
+        )
+
+        choice = alert.runModal()
+        if choice not in (NSAlertFirstButtonReturn, NSAlertFirstButtonReturn + 1):
+            return
+        private = choice == NSAlertFirstButtonReturn
+        slug = str(field.stringValue()).strip()
+        if not slug:
+            return
+
+        self.w.publishButton.enable(False)
+        self.w.chooseFolderButton.enable(False)
+        self.set_status(
+            Glyphs.localize(
+                {
+                    "en": f"Creating {slug} on GitHub…",
+                    "de": f"Lege {slug} auf GitHub an…",
+                }
+            )
+        )
+        self.pending_publish = (slug, private)
+        # Let the sheet redraw before the network call blocks the main thread.
+        self.plugin.schedule_publish(self)
+
+    def performPublish(self):
+        slug, private = self.pending_publish
+        root = self.repo_root() or self.fontdir
+        ok, out = gh(publish_argv(slug, private, root), self.fontdir)
+
+        self.w.publishButton.enable(True)
+        self.w.chooseFolderButton.enable(True)
+        if not ok:
+            self.set_status(f"Could not publish: {out}")
+            self.reload()
+            return
+
+        self.reload()
+        self.messageChangedCallback(self.w.message)
+        url = self.remote_url() or slug
+        self.set_status(
+            Glyphs.localize(
+                {"en": f"Published to {url}", "de": f"Angelegt: {url}"}
+            )
+        )
 
     def chooseFolderCallback(self, sender):
         """Pick a folder to push to, and make it this repository's origin."""

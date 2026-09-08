@@ -232,6 +232,21 @@ class SaveToGit(GeneralPlugin):
             self.sheet.performPush()
 
     @objc.python_method
+    def schedule_publish(self, sheet):
+        """Publish after a moment, for the same reason as schedule_push."""
+        self.sheet = sheet
+        try:
+            self.performSelector_withObject_afterDelay_(
+                self.performPublish_, None, 0.05
+            )
+        except Exception:
+            sheet.performPublish()
+
+    def performPublish_(self, sender):
+        if self.sheet is not None:
+            self.sheet.performPublish()
+
+    @objc.python_method
     def _compareAllInOne(self, font, fontfile, fontdir):
         # Get previous version of the file
         msg = None

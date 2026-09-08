@@ -19,9 +19,17 @@ Instead of using the normal Save command, use `File > Save to Git`. This will sa
 
 When the push button is not available, the sheet says why, both in its status line and as a tooltip: either everything has been pushed already, or the repository has nowhere to push to.
 
+### Putting the repository on GitHub
+
+A repository that was made locally (`git init`, or *Create New Repository* in GitHub Desktop) is not connected to GitHub, so there is nothing to push to. The sheet then offers **Publish to GitHub…**, which creates the repository on GitHub and pushes everything committed so far to it. From then on the push button sends your commits to that same repository, like any normal clone.
+
+It asks before creating anything, and lets you edit the name and the owner: `SaschaBente/my-font` makes it yours, `dinamo-typefaces/my-font` puts it in that organisation. You choose private or public in the same dialog.
+
+This uses the [GitHub CLI](https://cli.github.com), which needs to be installed (`brew install gh`) and signed in once (`gh auth login`). The sheet says so if it is not.
+
 ### Pushing to a folder
 
-A repository that has no remote yet has nowhere to push to, so the sheet offers a **Choose Folder…** button next to the push button. Pick a folder — on a server, an external disk, a shared drive — and it becomes the place this font is pushed to:
+If you would rather not use GitHub at all, **Choose Folder…** sits next to it. Pick a folder — on a server, an external disk, a shared drive — and it becomes the place this font is pushed to:
 
 - The folder has to be **outside the repository** the font is in. A copy kept inside the thing it copies is no copy at all, so the picker opens next to your repository rather than in it.
 - An **empty folder** becomes the repository itself.
