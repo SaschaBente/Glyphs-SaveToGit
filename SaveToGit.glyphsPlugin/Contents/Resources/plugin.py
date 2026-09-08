@@ -121,6 +121,65 @@ class SaveToGit(GeneralPlugin):
         return msg
 
     @objc.python_method
+    def quick_message(self, font):
+        """A commit message that costs nothing to work out."""
+        try:
+            return f"Update {font.familyName} {font.masters[0].name}"
+        except (AttributeError, IndexError):
+            return ""
+
+    @objc.python_method
+    def save_font(self, font):
+        """Save the font, unless it has nothing to save.
+
+        A large font takes a noticeable moment to write, so it is worth
+        asking the document whether anything changed first.
+        """
+        try:
+            document = font.parent
+            if document is not None and not document.isDocumentEdited():
+                return
+        except AttributeError:
+            pass
+        font.save(font.filepath)
+
+    @objc.python_method
+    def describe_changes(self, font):
+        """Work out which glyphs changed, for the commit message.
+
+        This is the slow part: it opens the previous version of the font and
+        compares every glyph, so it only runs once the sheet is on screen.
+        """
+        font_path = font.filepath
+        if font_path is None:
+            return None
+
+        fontdir = Path(font_path).parent
+        fontfile = Path(font_path).name
+        # The package format is compared through git, which can only see
+        # what has been written to disk.
+        self.save_font(font)
+
+        if font_path.endswith(".glyphspackage"):
+            return self._comparePackage(font, fontfile, fontdir)
+        return self._compareAllInOne(font, fontfile, fontdir)
+
+    @objc.python_method
+    def schedule_describe(self, sheet):
+        """Describe the changes once the sheet has been drawn."""
+        self.sheet = sheet
+        try:
+            self.performSelector_withObject_afterDelay_(
+                self.performDescribe_, None, 0.05
+            )
+        except Exception:
+            sheet.performDescribe()
+
+    def performDescribe_(self, sender):
+        if self.sheet is not None:
+            self.sheet.performDescribe()
+
+    @objc.python_method
     def saveAndDescribe(self):
         """Save the current font and describe its changes.
 
@@ -219,18 +278,27 @@ class SaveToGit(GeneralPlugin):
         if not self.sheets_available(self.sheet_name):
             return
 
-        prepared = self.saveAndDescribe()
-        if prepared is None:
+        font = Glyphs.font
+        if font is None:
             return
-        font, fontdir, fontfile, msg = prepared
+        if font.filepath is None:
+            Message(
+                message=(
+                    "Please save your Glyphs file once before using "
+                    "Save to Git."
+                ),
+                title=self.sheet_name,
+            )
+            return
 
         repo = self.repo_for_font(font, self.sheet_name)
         if repo is None:
             return
 
-        # An empty message just means we have nothing to suggest; the sheet
-        # asks for one anyway.
-        self.sheet = CommitSheet(self, font, repo, msg or "")
+        # Show the sheet at once with a message that costs nothing. Saving
+        # the font and working out which glyphs changed can take seconds on
+        # a large family, and both happen once the sheet is up.
+        self.sheet = CommitSheet(self, font, repo, self.quick_message(font))
         self.sheet.open()
 
     # "Push to GitHub…": its own command, its own sheet

@@ -16,6 +16,8 @@ Committing and pushing are two separate commands, so that saving your work does 
 
 Nothing else happens: no pushing, no lists, no other buttons. If there is nothing to commit, or git refuses, the sheet stays open and says so.
 
+The sheet appears straight away, with `Update <Family> <Master>` already in the field. Saving the font and working out *which glyphs* changed is the slow part — on a large family it means writing several megabytes and comparing every glyph against the previous version — so it happens once the sheet is on screen, and the message is filled in with the glyph names when it is done. If you have started typing by then, what you typed is kept.
+
 ### Pushing
 
 `File > Push to GitHub…` opens a separate sheet showing the last 5 commits, the way GitHub Desktop does — message, short commit ID, who made it and when. A bullet (●) marks the ones that have not been pushed yet, and the header line says which branch goes where.

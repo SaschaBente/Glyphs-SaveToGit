@@ -413,6 +413,10 @@ class CommitSheet(SheetBase):
         self.plugin = plugin
         self.font = font
         self.repo = repo
+        # What was put in the field, so that a message the user has since
+        # edited is never overwritten by the detailed one.
+        self.suggested = suggested_msg
+        self.described = False
 
         self.w = self.make_window(plugin, font, (460, 200), (900, 200))
 
@@ -441,7 +445,14 @@ class CommitSheet(SheetBase):
         )
 
         self.w.status = vanilla.TextBox(
-            (16, 116, -16, 30), "", sizeStyle="small"
+            (16, 116, -16, 30),
+            Glyphs.localize(
+                {
+                    "en": "Saving, and looking for changed glyphs…",
+                    "de": "Sichere und suche geänderte Glyphen…",
+                }
+            ),
+            sizeStyle="small",
         )
 
         self.w.cancelButton = vanilla.Button(
@@ -462,10 +473,34 @@ class CommitSheet(SheetBase):
     def messageChangedCallback(self, sender):
         self.w.commitButton.enable(bool(sender.get().strip()))
 
+    def performDescribe(self):
+        """Fill in the detailed message, now that the sheet is up.
+
+        Saving the font and comparing it against the previous version is
+        what takes the time, so it happens here rather than before the
+        sheet is shown.
+        """
+        self.described = True
+        detailed = self.plugin.describe_changes(self.font)
+        self.set_status("")
+        if not detailed:
+            return
+        # Anything the user has typed in the meantime wins.
+        if self.w.message.get().strip() in ("", self.suggested):
+            self.suggested = detailed
+            self.w.message.set(detailed)
+            self.w.message.setPlaceholder(detailed)
+            self.messageChangedCallback(self.w.message)
+            self.w.message.selectAll()
+
     def commitCallback(self, sender):
         msg = self.w.message.get().strip()
         if not msg:
             return
+
+        # Normally the font was saved while describing the changes; this
+        # covers the case where that never ran, or the font changed since.
+        self.plugin.save_font(self.font)
 
         ok, out = self.repo.commit(msg)
         if not ok:
@@ -491,6 +526,8 @@ class CommitSheet(SheetBase):
     def open(self):
         self.w.open()
         self.w.message.selectAll()
+        # Only now, with the sheet drawn, do the slow part.
+        self.plugin.schedule_describe(self)
 
 
 class PushSheet(SheetBase):
