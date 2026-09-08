@@ -17,10 +17,11 @@ SHIFT = int(NSEventModifierFlagShift)
 OPTION = int(NSEventModifierFlagOption)
 CONTROL = int(NSEventModifierFlagControl)
 
-# Shift-Command-S and Option-Shift-Command-S. The key equivalent is the
-# lowercase letter; Shift belongs in the modifiers, not in the letter.
-COMMIT_SHORTCUT = ("s", COMMAND | SHIFT)
-PUSH_SHORTCUT = ("s", COMMAND | SHIFT | OPTION)
+# Option-Command-S and Control-Option-Command-S. Shift-Command-S is Save
+# As…, so it is left alone. The key equivalent is always the lowercase
+# letter; modifiers belong in the mask, not in the letter.
+COMMIT_SHORTCUT = ("s", COMMAND | OPTION)
+PUSH_SHORTCUT = ("s", COMMAND | OPTION | CONTROL)
 
 # In the order Apple writes them.
 MODIFIER_SYMBOLS = (

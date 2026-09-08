@@ -30,12 +30,12 @@ This command neither saves nor commits — it only pushes what you have already 
 
 The first time the plugin runs it offers to set them up for you:
 
-- **⇧⌘S** for `Commit to Git…`
-- **⌥⇧⌘S** for `Push to GitHub…`
+- **⌥⌘S** for `Commit to Git…`
+- **⌃⌥⌘S** for `Push to GitHub…`
 
 Answer once and it is remembered; the plugin sets the shortcuts itself, so there is nothing to do in System Settings.
 
-Note that **⇧⌘S is normally *Save As…***. If the File menu already uses either shortcut, the dialog says so before you decide — when two commands share one shortcut, the one higher up the menu wins. To be asked again, or to change your mind:
+These two stay clear of `⌘S` (Save) and `⇧⌘S` (Save As…). Should the File menu use either of them anyway, the dialog names the command that has it before you decide — when two commands share one shortcut, the one higher up the menu wins, and these are appended to the bottom. To be asked again, or to change your mind:
 
 ```bash
 # ask again next time Glyphs starts
