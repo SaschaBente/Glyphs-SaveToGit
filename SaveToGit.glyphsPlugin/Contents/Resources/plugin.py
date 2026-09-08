@@ -20,6 +20,9 @@ from GlyphsApp.plugins import GeneralPlugin
 PREF_SHORTCUTS = "de.kutilek.SaveToGit.shortcuts"
 PREF_SHORTCUTS_ASKED = "de.kutilek.SaveToGit.shortcutsAsked"
 
+# Where the suggested commit message comes from, remembered between sheets.
+PREF_MESSAGE_STYLE = "de.kutilek.SaveToGit.messageStyle"
+
 # The sheet lives next to this file, so make sure it can be imported.
 _RESOURCES = os.path.dirname(os.path.abspath(__file__))
 if _RESOURCES not in sys.path:
@@ -33,9 +36,11 @@ except ImportError as e:
     print(f"Save to Git: no keyboard shortcuts ({e})")
 
 try:
+    import gitsheet
     from gitsheet import CommitSheet, PushSheet, Repo, is_git_repo
 except ImportError as e:
     # vanilla is missing: keep the plain "Save to Git" command working.
+    gitsheet = None
     CommitSheet = None
     PushSheet = None
     Repo = None
@@ -225,6 +230,18 @@ class SaveToGit(GeneralPlugin):
         if glyphs:
             msg += ": " + ", ".join(sorted(set(glyphs)))
         return msg
+
+    @objc.python_method
+    def message_style(self):
+        """Where the suggested message comes from, as last chosen."""
+        stored = Glyphs.defaults[PREF_MESSAGE_STYLE]
+        if stored in (gitsheet.STYLE_CHANGES, gitsheet.STYLE_DATETIME):
+            return str(stored)
+        return gitsheet.STYLE_CHANGES
+
+    @objc.python_method
+    def set_message_style(self, style):
+        Glyphs.defaults[PREF_MESSAGE_STYLE] = style
 
     @objc.python_method
     def quick_message(self, font):

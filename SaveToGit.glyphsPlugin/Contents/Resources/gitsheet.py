@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 
 from AppKit import (
     NSAlert,
@@ -41,6 +42,19 @@ UNPUSHED_MARKER = "●"
 
 # How many commits the push sheet shows.
 LOG_LIMIT = 5
+
+# Where a suggested commit message comes from. Looking for changed glyphs
+# is precise but slow on a large family; the time and date is instant.
+STYLE_CHANGES = "changes"
+STYLE_DATETIME = "datetime"
+
+# Sortable, and unambiguous in any locale.
+TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M"
+
+
+def timestamp_message(when=None):
+    """A commit message that is just the time and date."""
+    return time.strftime(TIMESTAMP_FORMAT, when or time.localtime())
 
 # git will not put a unit separator in a name or a subject, so it is safe
 # to split the log on.
@@ -413,12 +427,23 @@ class CommitSheet(SheetBase):
         self.plugin = plugin
         self.font = font
         self.repo = repo
-        # What was put in the field, so that a message the user has since
-        # edited is never overwritten by the detailed one.
-        self.suggested = suggested_msg
+        # The message that costs nothing, kept for switching back to.
+        self.quick = suggested_msg
+        # The detailed one, once it has been worked out.
+        self.detailed = ""
         self.described = False
+        self.style = plugin.message_style()
 
-        self.w = self.make_window(plugin, font, (460, 200), (900, 200))
+        first = (
+            timestamp_message()
+            if self.style == STYLE_DATETIME
+            else suggested_msg
+        )
+        # What was put in the field, so that a message the user has since
+        # edited is never overwritten.
+        self.suggested = first
+
+        self.w = self.make_window(plugin, font, (460, 250), (900, 250))
 
         self.w.title = vanilla.TextBox(
             (16, 14, -16, 18), font.familyName or repo.fontfile
@@ -430,28 +455,48 @@ class CommitSheet(SheetBase):
             sizeStyle="small",
         )
 
+        self.w.styleLabel = vanilla.TextBox(
+            (16, 64, -16, 14),
+            Glyphs.localize(
+                {"en": "Suggest a message from", "de": "Vorschlag aus"}
+            ),
+            sizeStyle="small",
+        )
+        self.w.style = vanilla.SegmentedButton(
+            (16, 82, 300, 22),
+            [
+                {
+                    "title": Glyphs.localize(
+                        {"en": "Changed glyphs", "de": "Geänderte Glyphen"}
+                    )
+                },
+                {
+                    "title": Glyphs.localize(
+                        {"en": "Time and date", "de": "Uhrzeit und Datum"}
+                    )
+                },
+            ],
+            callback=self.styleChangedCallback,
+        )
+        self.w.style.set(0 if self.style == STYLE_CHANGES else 1)
+
         self.w.messageLabel = vanilla.TextBox(
-            (16, 62, -16, 14),
+            (16, 116, -16, 14),
             Glyphs.localize(
                 {"en": "Commit message", "de": "Commit-Beschreibung"}
             ),
             sizeStyle="small",
         )
         self.w.message = vanilla.EditText(
-            (16, 82, -16, 22),
-            suggested_msg,
-            placeholder=suggested_msg,
+            (16, 136, -16, 22),
+            first,
+            placeholder=first,
             callback=self.messageChangedCallback,
         )
 
         self.w.status = vanilla.TextBox(
-            (16, 116, -16, 30),
-            Glyphs.localize(
-                {
-                    "en": "Saving, and looking for changed glyphs…",
-                    "de": "Sichere und suche geänderte Glyphen…",
-                }
-            ),
+            (16, 168, -16, 30),
+            self.looking_text() if self.style == STYLE_CHANGES else "",
             sizeStyle="small",
         )
 
@@ -470,8 +515,49 @@ class CommitSheet(SheetBase):
         self.w.cancelButton.bind("\x1b", [])
         self.messageChangedCallback(self.w.message)
 
+    @staticmethod
+    def looking_text():
+        return Glyphs.localize(
+            {
+                "en": "Saving, and looking for changed glyphs…",
+                "de": "Sichere und suche geänderte Glyphen…",
+            }
+        )
+
     def messageChangedCallback(self, sender):
         self.w.commitButton.enable(bool(sender.get().strip()))
+
+    def suggest(self, message):
+        """Put a suggested message in the field, if it is still ours.
+
+        Anything the user has typed in the meantime wins.
+        """
+        if not message:
+            return
+        if self.w.message.get().strip() not in ("", self.suggested):
+            return
+        self.suggested = message
+        self.w.message.set(message)
+        self.w.message.setPlaceholder(message)
+        self.messageChangedCallback(self.w.message)
+        self.w.message.selectAll()
+
+    def styleChangedCallback(self, sender):
+        """Remember the choice, and suggest a message the new way."""
+        self.style = STYLE_CHANGES if sender.get() == 0 else STYLE_DATETIME
+        self.plugin.set_message_style(self.style)
+
+        if self.style == STYLE_DATETIME:
+            self.set_status("")
+            self.suggest(timestamp_message())
+            return
+
+        if self.described:
+            self.suggest(self.detailed or self.quick)
+            return
+        # Not looked yet: do it now, with the sheet already up.
+        self.set_status(self.looking_text())
+        self.plugin.schedule_describe(self)
 
     def performDescribe(self):
         """Fill in the detailed message, now that the sheet is up.
@@ -481,17 +567,11 @@ class CommitSheet(SheetBase):
         sheet is shown.
         """
         self.described = True
-        detailed = self.plugin.describe_changes(self.font)
+        self.detailed = self.plugin.describe_changes(self.font) or ""
         self.set_status("")
-        if not detailed:
-            return
-        # Anything the user has typed in the meantime wins.
-        if self.w.message.get().strip() in ("", self.suggested):
-            self.suggested = detailed
-            self.w.message.set(detailed)
-            self.w.message.setPlaceholder(detailed)
-            self.messageChangedCallback(self.w.message)
-            self.w.message.selectAll()
+        # The switch may have been moved while this was running.
+        if self.style == STYLE_CHANGES:
+            self.suggest(self.detailed)
 
     def commitCallback(self, sender):
         msg = self.w.message.get().strip()
@@ -526,8 +606,10 @@ class CommitSheet(SheetBase):
     def open(self):
         self.w.open()
         self.w.message.selectAll()
-        # Only now, with the sheet drawn, do the slow part.
-        self.plugin.schedule_describe(self)
+        # Only now, with the sheet drawn, do the slow part -- and only if
+        # the message is meant to come from the changed glyphs at all.
+        if self.style == STYLE_CHANGES:
+            self.plugin.schedule_describe(self)
 
 
 class PushSheet(SheetBase):
