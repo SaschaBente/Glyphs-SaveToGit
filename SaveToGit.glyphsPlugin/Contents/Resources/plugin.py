@@ -41,7 +41,9 @@ class SaveToGit(GeneralPlugin):
             {"en": "Save to Git", "de": "In Git sichern"}
         )
         # The same command, but with a sheet to write the commit message in.
-        self.sheet_name = self.name + "…"
+        self.sheet_name = Glyphs.localize(
+            {"en": "Commit to Git…", "de": "In Git committen…"}
+        )
         # Pushing is its own command, with its own sheet.
         self.push_name = Glyphs.localize(
             {"en": "Push to GitHub…", "de": "Zu GitHub pushen…"}
@@ -240,7 +242,7 @@ class SaveToGit(GeneralPlugin):
         self.run_git_cmd(["git", "commit", "-m", msg], fontdir)
         Glyphs.showNotification(self.name, msg)
 
-    # "Save to Git…": the same thing, but with a sheet
+    # "Commit to Git…": the same thing, but with a sheet
 
     @objc.python_method
     def sheets_available(self, title):

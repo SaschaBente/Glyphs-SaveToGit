@@ -2,7 +2,7 @@
 #
 # Two separate user interfaces, one for each half of the job:
 #
-#   CommitSheet  "Save to Git…"      type a message, commit, the sheet closes
+#   CommitSheet  "Commit to Git…"    type a message, commit, the sheet closes
 #   PushSheet    "Push to GitHub…"   see what would be pushed, and push it
 #
 # Repo is everything either of them needs to ask git, with no interface in it.
@@ -404,7 +404,7 @@ class SheetBase:
 
 
 class CommitSheet(SheetBase):
-    """"Save to Git…": a message and a commit, nothing else.
+    """"Commit to Git…": a message and a commit, nothing else.
 
     Committing closes the sheet, so this is the whole of it.
     """

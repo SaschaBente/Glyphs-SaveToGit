@@ -10,9 +10,9 @@ Instead of using the normal Save command, use `File > Save to Git`. This will sa
 
 Committing and pushing are two separate commands, so that saving your work does not drag the rest of git along with it.
 
-### Writing your own commit message
+### Committing with your own message
 
-`File > Save to Git…` (with the ellipsis) saves the file like the plain command, then opens a small sheet with one thing on it: a **commit message** field, prefilled with the message that `Save to Git` would have written by itself. Edit it, or type your own, and press **Commit**. The sheet closes and Glyphs shows a notification with the message. Return commits, Escape cancels.
+`File > Commit to Git…` saves the file like the plain command, then opens a small sheet with one thing on it: a **commit message** field, prefilled with the message that `Save to Git` would have written by itself. Edit it, or type your own, and press **Commit**. The sheet closes and Glyphs shows a notification with the message. Return commits, Escape cancels.
 
 Nothing else happens: no pushing, no lists, no other buttons. If there is nothing to commit, or git refuses, the sheet stays open and says so.
 
