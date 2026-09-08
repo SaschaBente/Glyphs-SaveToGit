@@ -6,6 +6,17 @@ Works in **Glyphs 3 and Glyphs 4** — the same plugin folder, installed in each
 
 If you collaborate with others on a font through Git, you will definitely need another tool, as the need to compare and merge different revisions will probably arise. _Save to Git_ doesn't handle this. Maybe try [MergeGlyphs](https://glyphsapp.com/tools/mergeglyphs) and [CommitGlyphs](https://github.com/jenskutilek/SmartTypography-Extension/tree/safari/assets).
 
+## Installation
+
+Download the plugin from the [latest release](https://github.com/SaschaBente/Glyphs-SaveToGit/releases/latest), unzip it, double-click `SaveToGit.glyphsPlugin`, and restart Glyphs.
+
+Two things it relies on:
+
+- **vanilla**, from `Window > Plugin Manager > Modules`. Both sheets need it; without it only the plain `Save to Git` command loads.
+- **git** itself, which you may already have. If not, open Terminal and run `xcode-select --install`.
+
+`Publish to GitHub…` additionally needs the [GitHub CLI](https://cli.github.com): `brew install gh`, then `gh auth login` once. Everything else works with git alone.
+
 ## Usage
 
 Instead of using the normal Save command, use `File > Save to Git`. This will save your file and commit the changes to the git repository the current file is part of.
