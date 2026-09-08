@@ -17,11 +17,11 @@ from GlyphsApp import FILE_MENU, Glyphs, Message
 from GlyphsApp.plugins import GeneralPlugin
 
 # Whether the shortcuts are wanted, and whether that has been asked yet.
-PREF_SHORTCUTS = "de.kutilek.SaveToGit.shortcuts"
-PREF_SHORTCUTS_ASKED = "de.kutilek.SaveToGit.shortcutsAsked"
+PREF_SHORTCUTS = "com.saschabente.GitCommit.shortcuts"
+PREF_SHORTCUTS_ASKED = "com.saschabente.GitCommit.shortcutsAsked"
 
 # Where the suggested commit message comes from, remembered between sheets.
-PREF_MESSAGE_STYLE = "de.kutilek.SaveToGit.messageStyle"
+PREF_MESSAGE_STYLE = "com.saschabente.GitCommit.messageStyle"
 
 # The sheet lives next to this file, so make sure it can be imported.
 _RESOURCES = os.path.dirname(os.path.abspath(__file__))
@@ -33,7 +33,7 @@ try:
 except ImportError as e:
     # Only the shortcuts are lost; everything else still works.
     shortcuts = None
-    print(f"Save to Git: no keyboard shortcuts ({e})")
+    print(f"Git Commit: no keyboard shortcuts ({e})")
 
 try:
     import gitsheet
@@ -58,7 +58,7 @@ GSCompareFonts = NSClassFromString("GSCompareFonts")
 GLYPHNAME_REGEX = compile(r"(?<=[A-Z])(_)")
 
 
-class SaveToGit(GeneralPlugin):
+class GitCommit(GeneralPlugin):
     @objc.python_method
     def settings(self):
         self.name = Glyphs.localize(
@@ -328,7 +328,7 @@ class SaveToGit(GeneralPlugin):
             Message(
                 message=(
                     "Please save your Glyphs file once before using "
-                    "Save to Git."
+                    "Git Commit."
                 ),
                 title=self.name,
             )
@@ -417,7 +417,7 @@ class SaveToGit(GeneralPlugin):
             Message(
                 message=(
                     "Please save your Glyphs file once before using "
-                    "Save to Git."
+                    "Git Commit."
                 ),
                 title=self.sheet_name,
             )
@@ -446,7 +446,7 @@ class SaveToGit(GeneralPlugin):
             Message(
                 message=(
                     "Please save your Glyphs file once before using "
-                    "Save to Git."
+                    "Git Commit."
                 ),
                 title=self.push_name,
             )
@@ -515,7 +515,9 @@ class SaveToGit(GeneralPlugin):
             msg = f"Add {font.familyName} {font.masters[0].name}"
         else:
             # Save to a temp file and open it for comparison
-            tmp_file_path = Path(fontdir) / f".de.kutilek.SaveToGit.{fontfile}"
+            tmp_file_path = (
+                Path(fontdir) / f".com.saschabente.GitCommit.{fontfile}"
+            )
             with open(tmp_file_path, "wb") as old_file:
                 old_file.write(old_data)
             old_font = Glyphs.open(str(tmp_file_path), showInterface=False)

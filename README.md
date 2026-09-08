@@ -1,14 +1,16 @@
-# Save to Git
+# Git Commit
 
 A plugin for Glyphs.app that saves your font and commits the changes to a git repository. Well suited if you just want to keep track of your changes.
 
+Based on [Save to Git](https://github.com/jenskutilek/Glyphs-SaveToGit) by Jens Kutilek, and MIT licensed like the original. It adds a sheet for writing your own commit message, a second one for pushing, keyboard shortcuts, and a way to put a local repository on GitHub without leaving Glyphs.
+
 Works in **Glyphs 3 and Glyphs 4** — the same plugin folder, installed in each. Glyphs 4 runs it on Python 3.14 and Glyphs 3 on 3.11, and both need the `vanilla` module from `Window > Plugin Manager > Modules`. Each app keeps its own preferences, so the shortcuts are offered once per version.
 
-If you collaborate with others on a font through Git, you will definitely need another tool, as the need to compare and merge different revisions will probably arise. _Save to Git_ doesn't handle this. Maybe try [MergeGlyphs](https://glyphsapp.com/tools/mergeglyphs) and [CommitGlyphs](https://github.com/jenskutilek/SmartTypography-Extension/tree/safari/assets).
+If you collaborate with others on a font through Git, you will definitely need another tool, as the need to compare and merge different revisions will probably arise. _Git Commit_ doesn’t handle this. Maybe try [MergeGlyphs](https://glyphsapp.com/tools/mergeglyphs) and [CommitGlyphs](https://github.com/jenskutilek/SmartTypography-Extension/tree/safari/assets).
 
 ## Installation
 
-Download the plugin from the [latest release](https://github.com/SaschaBente/Glyphs-SaveToGit/releases/latest), unzip it, double-click `SaveToGit.glyphsPlugin`, and restart Glyphs.
+Download the plugin from the [latest release](https://github.com/SaschaBente/Glyphs-SaveToGit/releases/latest), unzip it, double-click `GitCommit.glyphsPlugin`, and restart Glyphs.
 
 Two things it relies on:
 
@@ -59,9 +61,9 @@ These two stay clear of `⌘S` (Save) and `⇧⌘S` (Save As…). Should the Fil
 
 ```bash
 # ask again next time Glyphs starts
-defaults delete com.GeorgSeifert.Glyphs3 de.kutilek.SaveToGit.shortcutsAsked
+defaults delete com.GeorgSeifert.Glyphs3 com.saschabente.GitCommit.shortcutsAsked
 # or turn them off and leave it at that
-defaults write com.GeorgSeifert.Glyphs3 de.kutilek.SaveToGit.shortcuts -bool false
+defaults write com.GeorgSeifert.Glyphs3 com.saschabente.GitCommit.shortcuts -bool false
 ```
 
 ### Putting the repository on GitHub

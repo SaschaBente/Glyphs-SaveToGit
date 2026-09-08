@@ -1,4 +1,4 @@
-# Save to Git — keyboard shortcuts
+# Git Commit — keyboard shortcuts
 #
 # A plugin can give its own menu items key equivalents, so the shortcuts do
 # not have to be set up by hand in System Settings. Nothing here touches

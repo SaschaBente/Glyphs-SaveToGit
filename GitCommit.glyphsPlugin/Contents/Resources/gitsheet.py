@@ -1,4 +1,4 @@
-# Save to Git — the sheets
+# Git Commit — the sheets
 #
 # Two separate user interfaces, one for each half of the job:
 #
@@ -427,7 +427,7 @@ class SheetBase:
     """The window both sheets sit in."""
 
     def make_window(self, plugin, font, size, resizable_to=None):
-        title = Glyphs.localize({"en": "Save to Git", "de": "In Git sichern"})
+        title = Glyphs.localize({"en": "Git Commit", "de": "Git Commit"})
         parentWindow = plugin.parent_window(font)
         maxSize = resizable_to or size
         # Only a window that can be resized has a size worth remembering.
@@ -435,7 +435,7 @@ class SheetBase:
         # is quietly ignored in favour of the old height.
         name = type(self).__name__
         autosave = (
-            f"de.kutilek.SaveToGit.{name}" if maxSize != size else None
+            f"com.saschabente.GitCommit.{name}" if maxSize != size else None
         )
         if parentWindow is None:
             # No document window to attach to: use a normal window instead.
