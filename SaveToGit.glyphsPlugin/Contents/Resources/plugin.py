@@ -50,6 +50,9 @@ except ImportError as e:
         return True
 
 
+# Provided by the CompareFonts plugin that ships inside Glyphs, in both
+# version 3 and version 4. It is looked up rather than imported, and may be
+# missing, so nothing here may assume it is there.
 GSCompareFonts = NSClassFromString("GSCompareFonts")
 
 GLYPHNAME_REGEX = compile(r"(?<=[A-Z])(_)")
@@ -204,6 +207,12 @@ class SaveToGit(GeneralPlugin):
             # Glyph has been added
             if name not in old_font.glyphs:
                 glyphs.append(name)
+                continue
+
+            if GSCompareFonts is None:
+                # The class that compares glyphs belongs to a plugin that
+                # ships with Glyphs, and it is not always loaded. Without
+                # it, an added glyph is all that can be told apart.
                 continue
 
             # Glyph comparison

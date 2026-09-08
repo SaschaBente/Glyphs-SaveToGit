@@ -2,6 +2,8 @@
 
 A plugin for Glyphs.app that saves your font and commits the changes to a git repository. Well suited if you just want to keep track of your changes.
 
+Works in **Glyphs 3 and Glyphs 4** — the same plugin folder, installed in each. Glyphs 4 runs it on Python 3.14 and Glyphs 3 on 3.11, and both need the `vanilla` module from `Window > Plugin Manager > Modules`. Each app keeps its own preferences, so the shortcuts are offered once per version.
+
 If you collaborate with others on a font through Git, you will definitely need another tool, as the need to compare and merge different revisions will probably arise. _Save to Git_ doesn't handle this. Maybe try [MergeGlyphs](https://glyphsapp.com/tools/mergeglyphs) and [CommitGlyphs](https://github.com/jenskutilek/SmartTypography-Extension/tree/safari/assets).
 
 ## Usage
