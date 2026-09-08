@@ -26,6 +26,24 @@ One **Push to GitHub** button sends them, showing how many are waiting (`Push to
 
 This command neither saves nor commits — it only pushes what you have already committed.
 
+### Keyboard shortcuts
+
+The first time the plugin runs it offers to set them up for you:
+
+- **⇧⌘S** for `Commit to Git…`
+- **⌥⇧⌘S** for `Push to GitHub…`
+
+Answer once and it is remembered; the plugin sets the shortcuts itself, so there is nothing to do in System Settings.
+
+Note that **⇧⌘S is normally *Save As…***. If the File menu already uses either shortcut, the dialog says so before you decide — when two commands share one shortcut, the one higher up the menu wins. To be asked again, or to change your mind:
+
+```bash
+# ask again next time Glyphs starts
+defaults delete com.GeorgSeifert.Glyphs3 de.kutilek.SaveToGit.shortcutsAsked
+# or turn them off and leave it at that
+defaults write com.GeorgSeifert.Glyphs3 de.kutilek.SaveToGit.shortcuts -bool false
+```
+
 ### Putting the repository on GitHub
 
 A repository that was made locally (`git init`, or *Create New Repository* in GitHub Desktop) is not connected to GitHub, so there is nothing to push to. The push sheet then offers **Publish to GitHub…** in place of the push button, which creates the repository on GitHub and pushes everything committed so far to it. From then on the push button sends your commits to that same repository, like any normal clone.
@@ -52,7 +70,7 @@ If that folder later goes missing — deleted, on a disk that is not plugged in,
 
 - The `git` command line utility must be installed on your system (see below for instructions).
 - The git repository must already be set up, and the Glyphs file must have been saved and committed.
-- Set your own shortcut via system preferences.
+- The plain `Save to Git` command has no shortcut of its own; set one in System Settings if you want it.
 - The sheet needs the `vanilla` module, which you can install from `Window > Plugin Manager > Modules`. Without it, `File > Save to Git` still works.
 - Pushing uses the credentials git is already set up with; it never asks for a password. If pushing fails because there are no stored credentials, set them up once in the Terminal (for example with `gh auth login` or by pushing that repository manually).
 

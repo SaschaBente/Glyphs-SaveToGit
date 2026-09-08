@@ -13,9 +13,9 @@
 	<key>CFBundleName</key>
 	<string>Save To Git</string>
 	<key>CFBundleVersion</key>
-	<string>19</string>
+	<string>20</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.19</string>
+	<string>0.20</string>
 	<key>UpdateFeedURL</key>
 	<string>https://raw.githubusercontent.com/jenskutilek/Glyphs-SaveToGit/main/SaveToGit.glyphsPlugin/Contents/Info.plist</string>
 	<key>productPageURL</key>

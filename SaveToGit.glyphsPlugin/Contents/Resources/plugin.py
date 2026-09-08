@@ -7,14 +7,30 @@ import sys
 from pathlib import Path
 from re import compile, sub
 
-from AppKit import NSClassFromString, NSMenuItem
+from AppKit import (
+    NSAlert,
+    NSAlertFirstButtonReturn,
+    NSClassFromString,
+    NSMenuItem,
+)
 from GlyphsApp import FILE_MENU, Glyphs, Message
 from GlyphsApp.plugins import GeneralPlugin
+
+# Whether the shortcuts are wanted, and whether that has been asked yet.
+PREF_SHORTCUTS = "de.kutilek.SaveToGit.shortcuts"
+PREF_SHORTCUTS_ASKED = "de.kutilek.SaveToGit.shortcutsAsked"
 
 # The sheet lives next to this file, so make sure it can be imported.
 _RESOURCES = os.path.dirname(os.path.abspath(__file__))
 if _RESOURCES not in sys.path:
     sys.path.insert(0, _RESOURCES)
+
+try:
+    import shortcuts
+except ImportError as e:
+    # Only the shortcuts are lost; everything else still works.
+    shortcuts = None
+    print(f"Save to Git: no keyboard shortcuts ({e})")
 
 try:
     from gitsheet import CommitSheet, PushSheet, Repo, is_git_repo
@@ -71,8 +87,96 @@ class SaveToGit(GeneralPlugin):
         pushMenuItem.setAction_(self.openPushSheet_)
         Glyphs.menu[FILE_MENU].append(pushMenuItem)
 
+        # Kept so their shortcuts can be set, now or later.
+        self.commitMenuItem = openSheetMenuItem
+        self.pushMenuItem = pushMenuItem
+        self.setUpShortcuts()
+
     def validateMenuItem_(self, menuItem):
         return Glyphs.font is not None
+
+    # Keyboard shortcuts
+
+    @objc.python_method
+    def setUpShortcuts(self):
+        """Apply the shortcuts, asking the first time the plugin is used."""
+        if shortcuts is None:
+            return
+        if Glyphs.defaults[PREF_SHORTCUTS]:
+            self.applyShortcuts()
+        elif not Glyphs.defaults[PREF_SHORTCUTS_ASKED]:
+            # Glyphs is still starting up, so let it finish before putting a
+            # dialog in front of the user.
+            try:
+                self.performSelector_withObject_afterDelay_(
+                    self.askAboutShortcuts_, None, 2.0
+                )
+            except Exception as e:
+                print(f"{self.name}: could not offer shortcuts ({e})")
+
+    @objc.python_method
+    def applyShortcuts(self):
+        shortcuts.apply_shortcut(
+            self.commitMenuItem, shortcuts.COMMIT_SHORTCUT
+        )
+        shortcuts.apply_shortcut(self.pushMenuItem, shortcuts.PUSH_SHORTCUT)
+
+    def askAboutShortcuts_(self, sender):
+        """Offer to set the shortcuts, once, the first time."""
+        Glyphs.defaults[PREF_SHORTCUTS_ASKED] = True
+
+        commit = shortcuts.describe(shortcuts.COMMIT_SHORTCUT)
+        push = shortcuts.describe(shortcuts.PUSH_SHORTCUT)
+        question = Glyphs.localize(
+            {
+                "en": f"Use {commit} for “{self.sheet_name}” and {push} for "
+                f"“{self.push_name}”?",
+                "de": f"{commit} für „{self.sheet_name}“ und {push} für "
+                f"„{self.push_name}“ verwenden?",
+            }
+        )
+
+        # Say so if a shortcut is already spoken for, rather than quietly
+        # taking it over.
+        taken = []
+        ours = (self.commitMenuItem, self.pushMenuItem)
+        menu = self.commitMenuItem.menu()
+        for shortcut in (
+            shortcuts.COMMIT_SHORTCUT,
+            shortcuts.PUSH_SHORTCUT,
+        ):
+            for title in shortcuts.conflicts(menu, shortcut, ignore=ours):
+                taken.append(f"{shortcuts.describe(shortcut)} — {title}")
+        if taken:
+            listed = "\n".join(taken)
+            question += Glyphs.localize(
+                {
+                    "en": "\n\nThe File menu already uses:\n" + listed
+                    + "\n\nWhichever command comes first in the menu wins, "
+                    "so you may want to set your own instead.",
+                    "de": "\n\nDas Ablage-Menü verwendet bereits:\n" + listed
+                    + "\n\nEs gewinnt der Befehl, der im Menü zuerst steht; "
+                    "vielleicht setzt du lieber eigene.",
+                }
+            )
+
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(
+            Glyphs.localize(
+                {"en": "Set keyboard shortcuts?", "de": "Tastaturkürzel setzen?"}
+            )
+        )
+        alert.setInformativeText_(question)
+        alert.addButtonWithTitle_(
+            Glyphs.localize({"en": "Set Shortcuts", "de": "Kürzel setzen"})
+        )
+        alert.addButtonWithTitle_(
+            Glyphs.localize({"en": "Not Now", "de": "Jetzt nicht"})
+        )
+
+        if alert.runModal() == NSAlertFirstButtonReturn:
+            Glyphs.defaults[PREF_SHORTCUTS] = True
+            self.applyShortcuts()
 
     @objc.python_method
     def run_git_cmd(self, args, working_dir=None):
