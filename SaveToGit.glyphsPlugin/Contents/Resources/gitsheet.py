@@ -18,8 +18,10 @@ from AppKit import (
     NSAlertFirstButtonReturn,
     NSFont,
     NSMakeRect,
+    NSMakePoint,
     NSModalResponseOK,
     NSOpenPanel,
+    NSSegmentStyleCapsule,
     NSTextField,
     NSURL,
 )
@@ -50,6 +52,44 @@ STYLE_DATETIME = "datetime"
 
 # Sortable, and unambiguous in any locale.
 TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M"
+
+# The commit sheet keeps a fixed width so its switch stays centred.
+SHEET_WIDTH = 460
+SWITCH_WIDTH = 260
+SWITCH_HEIGHT = 24
+
+
+def center_horizontally(control, container_width):
+    """Centre a control on the frame AppKit gave it.
+
+    A segmented control comes out a little wider than it was asked for, so
+    centring on the requested width leaves it visibly off.
+    """
+    frame = control.frame()
+    x = round((container_width - frame.size.width) / 2.0)
+    control.setFrameOrigin_(NSMakePoint(x, frame.origin.y))
+
+
+def make_pill(control):
+    """Round a control's ends off completely.
+
+    The capsule segment style is the intent; clipping the layer to half the
+    height is what actually guarantees the shape, since AppKit has drawn
+    capsules as plain rounded rectangles for some years now. The height has
+    to be the one the control ended up with, not the one it was asked for.
+    """
+    try:
+        control.setSegmentStyle_(NSSegmentStyleCapsule)
+    except (AttributeError, ValueError):
+        pass
+    try:
+        control.setWantsLayer_(True)
+        layer = control.layer()
+        if layer is not None:
+            layer.setCornerRadius_(control.frame().size.height / 2.0)
+            layer.setMasksToBounds_(True)
+    except AttributeError:
+        pass
 
 
 def timestamp_message(when=None):
@@ -443,27 +483,12 @@ class CommitSheet(SheetBase):
         # edited is never overwritten.
         self.suggested = first
 
-        self.w = self.make_window(plugin, font, (460, 250), (900, 250))
+        # A fixed width, so the switch stays centred.
+        self.w = self.make_window(plugin, font, (SHEET_WIDTH, 200))
 
-        self.w.title = vanilla.TextBox(
-            (16, 14, -16, 18), font.familyName or repo.fontfile
-        )
-        self.w.title.getNSTextField().setFont_(NSFont.boldSystemFontOfSize_(13))
-        self.w.subtitle = vanilla.TextBox(
-            (16, 34, -16, 14),
-            f"{repo.fontfile} — {repo.name()}, {repo.branch() or '?'}",
-            sizeStyle="small",
-        )
-
-        self.w.styleLabel = vanilla.TextBox(
-            (16, 64, -16, 14),
-            Glyphs.localize(
-                {"en": "Suggest a message from", "de": "Vorschlag aus"}
-            ),
-            sizeStyle="small",
-        )
+        switch_left = (SHEET_WIDTH - SWITCH_WIDTH) // 2
         self.w.style = vanilla.SegmentedButton(
-            (16, 82, 300, 22),
+            (switch_left, 16, SWITCH_WIDTH, SWITCH_HEIGHT),
             [
                 {
                     "title": Glyphs.localize(
@@ -479,23 +504,27 @@ class CommitSheet(SheetBase):
             callback=self.styleChangedCallback,
         )
         self.w.style.set(0 if self.style == STYLE_CHANGES else 1)
+        switch = self.w.style.getNSSegmentedButton()
+        make_pill(switch)
+        center_horizontally(switch, SHEET_WIDTH)
 
         self.w.messageLabel = vanilla.TextBox(
-            (16, 116, -16, 14),
+            (16, 58, -16, 14),
             Glyphs.localize(
                 {"en": "Commit message", "de": "Commit-Beschreibung"}
             ),
             sizeStyle="small",
         )
         self.w.message = vanilla.EditText(
-            (16, 136, -16, 22),
+            (16, 78, -16, 22),
             first,
             placeholder=first,
             callback=self.messageChangedCallback,
         )
 
+        # Room for whatever the switch, or git, has to say.
         self.w.status = vanilla.TextBox(
-            (16, 168, -16, 30),
+            (16, 112, -16, 34),
             self.looking_text() if self.style == STYLE_CHANGES else "",
             sizeStyle="small",
         )

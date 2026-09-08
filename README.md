@@ -18,7 +18,7 @@ Nothing else happens: no pushing, no lists, no other buttons. If there is nothin
 
 The sheet appears straight away, with `Update <Family> <Master>` already in the field. Saving the font and working out *which glyphs* changed is the slow part — on a large family it means writing several megabytes and comparing every glyph against the previous version — so it happens once the sheet is on screen, and the message is filled in with the glyph names when it is done. If you have started typing by then, what you typed is kept.
 
-**Suggest a message from** — a switch at the top of the sheet chooses where that suggestion comes from:
+A switch at the top of the sheet chooses where that suggestion comes from:
 
 - **Changed glyphs** — `Update ABC Repro Regular: A, AE, AEacute`. Precise, and the reason for the wait above.
 - **Time and date** — `2026-09-08 10:47`. Instant: nothing is compared, and the previous version of the font is never opened. Worth choosing if you commit often and a large family makes the wait tiresome.
@@ -38,7 +38,7 @@ This command neither saves nor commits — it only pushes what you have already 
 The first time the plugin runs it offers to set them up for you:
 
 - **⌥⌘S** for `Commit to Git…`
-- **⌃⌥⌘S** for `Push to GitHub…`
+- **⌥⇧⌘S** for `Push to GitHub…`
 
 Answer once and it is remembered; the plugin sets the shortcuts itself, so there is nothing to do in System Settings.
 
