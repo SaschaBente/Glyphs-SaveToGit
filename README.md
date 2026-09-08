@@ -2,7 +2,11 @@
 
 A plugin for Glyphs.app that saves your font and commits the changes to a git repository. Well suited if you just want to keep track of your changes.
 
-Based on [Save to Git](https://github.com/jenskutilek/Glyphs-SaveToGit) by Jens Kutilek, and MIT licensed like the original. It adds a sheet for writing your own commit message, a second one for pushing, keyboard shortcuts, and a way to put a local repository on GitHub without leaving Glyphs.
+## Credit
+
+_Git Commit_ began as a fork of [Save to Git](https://github.com/jenskutilek/Glyphs-SaveToGit) by Jens Kutilek, whose plugin is the foundation this is built on: the idea, the menu command, and the comparison that works out which glyphs changed are all his. It has since grown a sheet for writing your own commit message, a second one for pushing, keyboard shortcuts, and a way to put a local repository on GitHub without leaving Glyphs — enough that it is now its own plugin rather than a patch to his.
+
+The full history of both is in this repository's git log, and it is MIT licensed like the original.
 
 Works in **Glyphs 3 and Glyphs 4** — the same plugin folder, installed in each. Glyphs 4 runs it on Python 3.14 and Glyphs 3 on 3.11, and both need the `vanilla` module from `Window > Plugin Manager > Modules`. Each app keeps its own preferences, so the shortcuts are offered once per version.
 
@@ -10,7 +14,7 @@ If you collaborate with others on a font through Git, you will definitely need a
 
 ## Installation
 
-Download the plugin from the [latest release](https://github.com/SaschaBente/Glyphs-SaveToGit/releases/latest), unzip it, double-click `GitCommit.glyphsPlugin`, and restart Glyphs.
+Download the plugin from the [latest release](https://github.com/SaschaBente/Glyphs-GitCommit/releases/latest), unzip it, double-click `GitCommit.glyphsPlugin`, and restart Glyphs.
 
 Two things it relies on:
 
