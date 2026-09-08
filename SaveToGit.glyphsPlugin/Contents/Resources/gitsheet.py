@@ -430,6 +430,13 @@ class SheetBase:
         title = Glyphs.localize({"en": "Save to Git", "de": "In Git sichern"})
         parentWindow = plugin.parent_window(font)
         maxSize = resizable_to or size
+        # Only a window that can be resized has a size worth remembering.
+        # Saving the frame of a fixed one means a later change to the layout
+        # is quietly ignored in favour of the old height.
+        name = type(self).__name__
+        autosave = (
+            f"de.kutilek.SaveToGit.{name}" if maxSize != size else None
+        )
         if parentWindow is None:
             # No document window to attach to: use a normal window instead.
             return vanilla.Window(
@@ -437,14 +444,14 @@ class SheetBase:
                 title,
                 minSize=size,
                 maxSize=maxSize,
-                autosaveName=f"de.kutilek.SaveToGit.{type(self).__name__}",
+                autosaveName=autosave,
             )
         return vanilla.Sheet(
             size,
             parentWindow,
             minSize=size,
             maxSize=maxSize,
-            autosaveName=f"de.kutilek.SaveToGit.{type(self).__name__}.sheet",
+            autosaveName=autosave,
         )
 
     def set_status(self, text):
@@ -484,7 +491,7 @@ class CommitSheet(SheetBase):
         self.suggested = first
 
         # A fixed width, so the switch stays centred.
-        self.w = self.make_window(plugin, font, (SHEET_WIDTH, 200))
+        self.w = self.make_window(plugin, font, (SHEET_WIDTH, 172))
 
         switch_left = (SHEET_WIDTH - SWITCH_WIDTH) // 2
         self.w.style = vanilla.SegmentedButton(
@@ -522,9 +529,9 @@ class CommitSheet(SheetBase):
             callback=self.messageChangedCallback,
         )
 
-        # Room for whatever the switch, or git, has to say.
+        # One line for whatever the switch, or git, has to say.
         self.w.status = vanilla.TextBox(
-            (16, 112, -16, 34),
+            (16, 106, -16, 16),
             self.looking_text() if self.style == STYLE_CHANGES else "",
             sizeStyle="small",
         )
